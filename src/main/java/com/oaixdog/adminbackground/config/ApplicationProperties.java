@@ -67,10 +67,6 @@ public class ApplicationProperties {
     @Value("${server.package-dir:packages}")
     private String packageDir;
 
-    /** 数据源「按区自动发现」读取游戏服节点用的 ZooKeeper 地址，例如 127.0.0.1:2181；为空时不能使用该类型 */
-    @Value("${zookeeper.address:}")
-    private String zookeeperAddress;
-
     /** Agent 安装命令里的后台地址，例如 http://111.230.143.165，安装脚本和 Agent 包在它的 /agent/ 下 */
     @Value("${agent.base-url:}")
     private String agentBaseUrl;

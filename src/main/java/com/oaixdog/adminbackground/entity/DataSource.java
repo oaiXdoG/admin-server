@@ -13,9 +13,9 @@ import lombok.Setter;
 public class DataSource {
 
     public static final String TYPE_HTTP = "http";
-    /** 按区自动发现：地址从 ZooKeeper 的游戏服节点读取，url 为空 */
+    /** 按区自动发现：地址取自游戏服上报（NodeInfoReportService），url 为空；密钥同时用于校验游戏服上报的签名 */
     public static final String TYPE_ZONE = "zone";
-    /** 按区自动发现时的连接方式：inner 用节点的内网地址，public 用节点的公网地址（后台和游戏服不在同一个内网时） */
+    /** 按区自动发现时的连接方式：inner 用上报的内网地址，public 用上报的公网地址（后台和游戏服不在同一个内网时） */
     public static final String NETWORK_INNER = "inner";
     public static final String NETWORK_PUBLIC = "public";
 

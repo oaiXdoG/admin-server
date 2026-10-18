@@ -152,8 +152,8 @@ public enum ErrorCode {
     PACKAGE_UPLOAD_INVALID(100083, "发布包上传无效或已过期，请重新上传"),
     PACKAGE_INVALID(100084, "发布包不是有效的 zip 压缩包或为空"),
     FILE_OP_NOT_FOUND(100085, "文件操作不存在或已过期"),
-    ZOOKEEPER_NOT_CONFIGURED(100086, "后台没有配置 ZooKeeper（zookeeper.address），不能使用按区自动发现"),
-    ZONE_NOT_AVAILABLE(100087, "没有可用的区服（游戏服都不在线，或没有提供查询接口）");
+    ZONE_NOT_AVAILABLE(100087, "没有可用的区服（游戏服都不在线，或没有提供查询接口）"),
+    NODE_REPORT_DENIED(100088, "节点信息上报验签失败");
 
     private final int code;
     private final String message;

@@ -117,6 +117,7 @@ import com.oaixdog.adminbackground.protocol.ServerFileResultRequest;
 import com.oaixdog.adminbackground.protocol.AgentPackageRequest;
 import com.oaixdog.adminbackground.protocol.AgentFileResultRequest;
 import com.oaixdog.adminbackground.protocol.AgentWaitRequest;
+import com.oaixdog.adminbackground.protocol.NodeInfoReportRequest;
 import com.oaixdog.adminbackground.service.AgentService;
 import com.zfoo.net.core.HostAndPort;
 import com.zfoo.net.core.http.HttpServer;
@@ -261,6 +262,7 @@ public class Application {
                 case "POST /api/agent/package" -> parseAgentRequest(rawRequest, AgentPackageRequest.class);
                 case "POST /api/agent/file-result" -> parseAgentRequest(rawRequest, AgentFileResultRequest.class);
                 case "POST /api/agent/wait" -> parseAgentRequest(rawRequest, AgentWaitRequest.class);
+                case "POST /api/node/report" -> parseAgentRequest(rawRequest, NodeInfoReportRequest.class);
                 default -> new RuntimeException("Unknown route: " + route);
             };
 
@@ -281,7 +283,7 @@ public class Application {
         return parseRequest(rawRequest, ProjectListRequest.class);
     }
 
-    /** Agent 请求要按请求体验签，请求体在进入控制器前已释放，这里先把它的 SHA-256 写进内部请求头（覆盖客户端传来的同名头） */
+    /** Agent 请求和节点信息上报要按请求体验签，请求体在进入控制器前已释放，这里先把它的 SHA-256 写进内部请求头（覆盖客户端传来的同名头） */
     private static <T> T parseAgentRequest(FullHttpRequest rawRequest, Class<T> requestClass) {
         String body = rawRequest.content().toString(StandardCharsets.UTF_8);
         rawRequest.headers().set(AgentService.BODY_DIGEST_HEADER, AgentService.digest(body));

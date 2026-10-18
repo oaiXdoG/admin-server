@@ -134,6 +134,7 @@
         <protocol location="com.oaixdog.adminbackground.protocol.AgentWaitRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.DataSourceZonesRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.ServerMetricQueryRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.NodeInfoReportRequest"/>
     </module>
 
 </protocols>

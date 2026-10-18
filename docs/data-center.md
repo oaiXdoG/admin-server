@@ -10,11 +10,11 @@ admin 不直连业务数据库，而是调用业务服务器按下面规范提�
 | --- | --- | --- |
 | 数据查询 | `data_query` | 选模板，按模板定义的参数填写条件，结果按模板的结果字段成列；点「详情」看完整返回（点表格其他位置不会打开，方便选中复制）；导出按钮 `data_query:export` |
 | 查询模板 | `data_template` | 管理员选数据源和查询名，定义参数和结果字段；可从数据源的查询清单自动带出。按钮 `:create`、`:update`、`:remove` |
-| 数据源 | `data_source` | 每个项目配置业务服务器的查询接口：固定地址，或按区自动发现（多区游戏服只配一次）；签名密钥；可测试连接。按钮 `:create`、`:update`、`:remove` |
+| 数据源 | `data_source` | 每个项目配置业务服务器的查询接口：固定地址，或按区自动发现（多区游戏服只配一次，地址来自游戏服上报）；签名密钥；可测试连接。按钮 `:create`、`:update`、`:remove` |
 
 ## 二、业务服务器接口规范
 
-业务服务器提供两个 `POST` 接口，地址为数据源里配置的「接口地址」加路径（按区自动发现时为各区在 ZooKeeper 节点里的 `innerHost:innerPort`）：
+业务服务器提供两个 `POST` 接口，地址为数据源里配置的「接口地址」加路径（按区自动发现时为各区游戏服上报的 `innerHost:gmPort`，连接方式为公网时为 `host:gmPort`）：
 
 | 路径 | 用途 |
 | --- | --- |
@@ -119,7 +119,7 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 `type` 两种：
 
 - `http` 固定地址：`url` 为业务服务器接口地址（登录服、回调服等不分区的服务）。
-- `zone` 按区自动发现（多区游戏服）：`url` 为空。后台从 ZooKeeper 读取本项目的游戏服节点 `/danmu/<项目 App Key>/logic/<区ID>`（规则见 danmu-login `docs/service-discovery.md`），每个区的接口地址按 `network`（连接方式）决定：`inner`（默认，后台和游戏服在同一个内网）为 `http://<节点 innerHost>:<节点 innerPort>`，`public`（不在同一个内网）为 `http://<节点 host>:<节点 innerPort>`，此时游戏服的查询端口要对后台服务器的 IP 开放；`innerPort` 为 0 的区不提供查询接口、不参与查询。所有区共用一个签名密钥和同一套查询模板。只能查在线（节点存在）的区。后台配置 `zookeeper.address`（例如 `127.0.0.1:2181`），没有配置时不能使用这个类型。
+- `zone` 按区自动发现（多区游戏服）：`url` 为空。各项目的游戏服定时用 HTTP 上报到后台（`POST /api/node/report`，见下文「节点信息上报」），后台按 `App Key → serverId（区 ID）` 保存在内存里；每个区的接口地址按 `network`（连接方式）决定：`inner`（默认，后台和游戏服在同一个内网）为 `http://<上报的 innerHost>:<上报的 gmPort>`，`public`（不在同一个内网）为 `http://<上报的 host>:<上报的 gmPort>`，此时游戏服的 GM 端口要对后台服务器的 IP 开放；`gmPort` 为 0 的区不提供查询接口、不参与查询。可查询的区按区 ID 排序。所有区共用一个签名密钥和同一套查询模板，这个密钥同时用于校验游戏服的上报（游戏服的 `gm.secret`）。只能查在线（30 秒内有上报）的区；后台重启后内存表为空，游戏服 10 秒内重新上报补齐。
 
 | 接口 | 权限 | 说明 |
 | --- | --- | --- |
@@ -130,6 +130,29 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 | `POST /api/data/source/test` | `data_source:create` 或 `:update` | `{ projectId, sourceId?, type, network, url, secret, timeoutMs }`，调用 `/admin/queries`（`zone` 类型调用第一个可用的区），返回 `{ queryCount, zones }`，`zones` 为发现的区 `[{ zoneId, url }]`（`http` 类型为空列表）；`sourceId` 有值且密钥留空时用已保存的密钥 |
 | `POST /api/data/source/queries` | `data_template` | `{ projectId, sourceId }` → `{ queries }`，原样返回业务服务器的查询清单（`zone` 类型取第一个可用的区） |
 | `POST /api/data/source/zones` | `data_query` 或 `data_template` | `{ projectId, sourceId }` → `{ list }`，`zone` 类型数据源当前可查询的区 `[{ zoneId, url }]`，按区 ID 排序；`http` 类型返回空列表 |
+
+### 节点信息上报
+
+`POST /api/node/report`：游戏服调用，不需要登录，按签名鉴权（规则见 danmu-login `docs/service-discovery.md` 第 7 节）。上报地址（游戏服 `admin.report-url`）为后台对外地址加 `/api/node/report`，游戏服所在服务器要能访问到。游戏服就绪后立即上报一次，之后每 10 秒一次。
+
+请求体：
+
+```json
+{ "serverId": 1, "instanceId": "…", "host": "111.230.143.165", "port": 9020, "innerHost": "10.0.0.8", "gmPort": 9021 }
+```
+
+请求头：
+
+| 请求头 | 值 |
+| --- | --- |
+| `X-Admin-Project` | 项目 App Key |
+| `X-Admin-Timestamp` | 毫秒时间戳 |
+| `X-Admin-Signature` | `hex(HMAC-SHA256(密钥, 时间戳 + "\n" + hex(SHA256(请求体))))`，小写十六进制 |
+
+- 验签：按 `X-Admin-Project` 找项目，取该项目所有 `zone` 类型数据源的密钥，任一密钥算出的签名相同即通过；App Key 不存在、项目没有 `zone` 数据源、签名不对、时间戳与后台相差超过 5 分钟都返回 `100088`，不保存。拒绝时打印警告（App Key、serverId、来源 IP、原因），同一 App Key + 来源 IP 每分钟最多一次。
+- 参数：`serverId > 0`；`instanceId`、`host`、`innerHost` 非空；`port`、`gmPort` 在 0～65535；不合法返回 `100001`。请求体里不认识的字段忽略（节点新增字段时后台不用先升级）。
+- 成功返回 `data: null`。每次上报直接覆盖该区的记录（区 ID 冲突由登录服、回调服拦截），记录不删除，30 秒内有上报视为在线。
+- 记录在后台进程内存里，后台按单进程部署；以后多实例部署时要改为放 Redis。
 
 ### 查询模板
 
@@ -161,8 +184,8 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 | `100057` | 业务数据源请求失败，消息里附带原因（无法连接、HTTP 状态、业务返回的 code 和 message 等） |
 | `100058` / `100059` / `100060` | 查询模板不存在 / 名称已存在 / 配置不合法 |
 | `100061` | 查询参数不合法 |
-| `100086` | 后台没有配置 ZooKeeper，不能使用按区自动发现 |
 | `100087` | 没有可用的区服（游戏服都不在线，或没有提供查询接口） |
+| `100088` | 节点信息上报验签失败 |
 
 ### 安全约定
 
