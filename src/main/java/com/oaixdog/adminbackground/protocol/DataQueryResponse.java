@@ -13,6 +13,6 @@ public class DataQueryResponse {
 
     private long total;
     private List<Map<String, Object>> list;
-    /** 按区查询时失败或已离线的区：{ zoneId, message } */
+    /** 按业务类型发现时失败或已离线的目标：{ target, message } */
     private List<Map<String, Object>> failures = List.of();
 }

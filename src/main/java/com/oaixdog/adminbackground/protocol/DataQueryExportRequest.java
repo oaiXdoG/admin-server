@@ -14,7 +14,7 @@ public class DataQueryExportRequest {
 
     private Long projectId;
     private Long templateId;
-    /** 按区自动发现的数据源：要查询的区 */
-    private List<Long> zoneIds;
+    /** 按业务类型发现的数据源：要查询的目标 key（区号或节点标识） */
+    private List<String> targets;
     private String params;
 }

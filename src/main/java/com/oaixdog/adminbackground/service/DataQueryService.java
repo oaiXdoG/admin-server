@@ -33,49 +33,49 @@ public class DataQueryService {
     private static final int EXPORT_PAGE_SIZE = 1_000;
     private static final int PARAMS_MAX_LENGTH = 16_384;
     private static final int TEXT_MAX_LENGTH = 512;
-    private static final String OFFLINE = "区服不在线";
+    private static final String OFFLINE = "不在线";
 
     private final PermissionService permissionService;
     private final DataTemplateService dataTemplateService;
     private final DataSourceService dataSourceService;
     private final BusinessClient businessClient;
 
-    private static final ExecutorService ZONE_EXECUTOR = Executors.newFixedThreadPool(8);
+    private static final ExecutorService TARGET_EXECUTOR = Executors.newFixedThreadPool(8);
 
-    /** 固定地址：targets 只有一个，键为 null；按区自动发现：区 ID → 目标，不在线的区目标为 null */
-    private record Call(Map<Integer, BusinessClient.Target> targets, boolean zone, String query, Map<String, Object> params) {
+    /** 固定地址：targets 只有一个，键为 null；按业务类型发现：目标 key → 调用目标，不在线的目标为 null */
+    private record Call(Map<String, BusinessClient.Target> targets, boolean discover, String query, Map<String, Object> params) {
     }
 
-    public DataQueryResponse query(String authorization, Long projectId, Long templateId, List<Long> zoneIds, String params, Integer page, Integer pageSize) {
+    public DataQueryResponse query(String authorization, Long projectId, Long templateId, List<String> targetKeys, String params, Integer page, Integer pageSize) {
         PermissionService.ProjectAccess access = permissionService.requireProjectMenu(authorization, projectId, MENU);
         int pageNumber = page == null ? 1 : page;
         int size = pageSize == null ? 20 : pageSize;
         if (pageNumber < 1 || size < 1 || size > PAGE_SIZE_MAX) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
-        Call call = prepare(access, templateId, zoneIds, params);
-        if (!call.zone()) {
+        Call call = prepare(access, templateId, targetKeys, params);
+        if (!call.discover()) {
             return fetch(call.targets().get(null), call, pageNumber, size);
         }
-        // 多个区同时查询，每个区取同一页，按区 ID 顺序合并；失败或离线的区记在 failures
-        Map<Integer, CompletableFuture<DataQueryResponse>> futures = new LinkedHashMap<>();
-        call.targets().forEach((zoneId, target) -> futures.put(zoneId, target == null ? null
-                : CompletableFuture.supplyAsync(() -> fetch(target, call, pageNumber, size), ZONE_EXECUTOR)));
+        // 多个目标同时查询，每个目标取同一页，按请求的目标顺序合并；失败或离线的目标记在 failures
+        Map<String, CompletableFuture<DataQueryResponse>> futures = new LinkedHashMap<>();
+        call.targets().forEach((key, target) -> futures.put(key, target == null ? null
+                : CompletableFuture.supplyAsync(() -> fetch(target, call, pageNumber, size), TARGET_EXECUTOR)));
         DataQueryResponse merged = new DataQueryResponse();
         List<Map<String, Object>> rows = new ArrayList<>();
         List<Map<String, Object>> failures = new ArrayList<>();
         long total = 0;
-        for (Map.Entry<Integer, CompletableFuture<DataQueryResponse>> entry : futures.entrySet()) {
+        for (Map.Entry<String, CompletableFuture<DataQueryResponse>> entry : futures.entrySet()) {
             if (entry.getValue() == null) {
-                failures.add(Map.of("zoneId", entry.getKey(), "message", OFFLINE));
+                failures.add(Map.of("target", entry.getKey(), "message", OFFLINE));
                 continue;
             }
             try {
                 DataQueryResponse response = entry.getValue().join();
                 total += response.getTotal();
-                rows.addAll(markZone(response.getList(), entry.getKey()));
+                rows.addAll(markTarget(response.getList(), entry.getKey()));
             } catch (BusinessException | CompletionException exception) {
-                failures.add(Map.of("zoneId", entry.getKey(), "message", message(exception)));
+                failures.add(Map.of("target", entry.getKey(), "message", message(exception)));
             }
         }
         merged.setTotal(total);
@@ -85,37 +85,37 @@ public class DataQueryService {
     }
 
     /** 按页依次取，最多 5 万行；业务服务器返回空页时停止 */
-    public DataQueryResponse export(String authorization, Long projectId, Long templateId, List<Long> zoneIds, String params) {
+    public DataQueryResponse export(String authorization, Long projectId, Long templateId, List<String> targetKeys, String params) {
         permissionService.requireProjectMenu(authorization, projectId, MENU + ":export");
         PermissionService.ProjectAccess access = permissionService.requireProjectMenu(authorization, projectId, MENU);
-        Call call = prepare(access, templateId, zoneIds, params);
+        Call call = prepare(access, templateId, targetKeys, params);
         List<Map<String, Object>> rows = new ArrayList<>();
         List<Map<String, Object>> failures = new ArrayList<>();
         long total = 0;
-        for (Map.Entry<Integer, BusinessClient.Target> entry : call.targets().entrySet()) {
+        for (Map.Entry<String, BusinessClient.Target> entry : call.targets().entrySet()) {
             if (rows.size() >= EXPORT_MAX) {
                 break;
             }
             if (entry.getValue() == null) {
-                failures.add(Map.of("zoneId", entry.getKey(), "message", OFFLINE));
+                failures.add(Map.of("target", entry.getKey(), "message", OFFLINE));
                 continue;
             }
             try {
-                List<Map<String, Object>> zoneRows = new ArrayList<>();
-                for (int page = 1; rows.size() + zoneRows.size() < EXPORT_MAX; page++) {
+                List<Map<String, Object>> targetRows = new ArrayList<>();
+                for (int page = 1; rows.size() + targetRows.size() < EXPORT_MAX; page++) {
                     DataQueryResponse response = fetch(entry.getValue(), call, page, EXPORT_PAGE_SIZE);
-                    zoneRows.addAll(response.getList());
-                    if (response.getList().isEmpty() || zoneRows.size() >= response.getTotal()) {
+                    targetRows.addAll(response.getList());
+                    if (response.getList().isEmpty() || targetRows.size() >= response.getTotal()) {
                         total += response.getTotal();
                         break;
                     }
                 }
-                rows.addAll(call.zone() ? markZone(zoneRows, entry.getKey()) : zoneRows);
+                rows.addAll(call.discover() ? markTarget(targetRows, entry.getKey()) : targetRows);
             } catch (BusinessException exception) {
-                if (!call.zone()) {
+                if (!call.discover()) {
                     throw exception;
                 }
-                failures.add(Map.of("zoneId", entry.getKey(), "message", message(exception)));
+                failures.add(Map.of("target", entry.getKey(), "message", message(exception)));
             }
         }
         DataQueryResponse response = new DataQueryResponse();
@@ -125,27 +125,28 @@ public class DataQueryService {
         return response;
     }
 
-    private Call prepare(PermissionService.ProjectAccess access, Long templateId, List<Long> zoneIds, String params) {
+    private Call prepare(PermissionService.ProjectAccess access, Long templateId, List<String> targetKeys, String params) {
         DataTemplate template = dataTemplateService.requireTemplate(access.projectId(), templateId);
         DataSource source = dataSourceService.requireSource(access.projectId(), template.getSourceId());
         Map<String, Object> values = convert(DataTemplateService.parseParams(template.getParams()), params);
-        if (!DataSource.TYPE_ZONE.equals(source.getType())) {
-            Map<Integer, BusinessClient.Target> targets = new LinkedHashMap<>();
+        if (!DataSource.TYPE_DISCOVER.equals(source.getType())) {
+            Map<String, BusinessClient.Target> targets = new LinkedHashMap<>();
             targets.put(null, dataSourceService.target(access, source));
             return new Call(targets, false, template.getQuery(), values);
         }
-        if (zoneIds == null || zoneIds.isEmpty() || zoneIds.contains(null)) {
-            throw new BusinessException(ErrorCode.DATA_QUERY_PARAM_INVALID, "请选择区服");
+        if (targetKeys == null || targetKeys.isEmpty() || targetKeys.stream().anyMatch(StringUtils::isBlank)) {
+            String label = DataSource.SERVICE_TYPE_LOGIC.equals(source.getServiceType()) ? "区服" : "节点";
+            throw new BusinessException(ErrorCode.DATA_QUERY_PARAM_INVALID, "请选择" + label);
         }
-        return new Call(dataSourceService.zoneTargets(access, source, zoneIds), true, template.getQuery(), values);
+        return new Call(dataSourceService.discoveredTargets(access, source, targetKeys), true, template.getQuery(), values);
     }
 
-    /** 每一行加上区 ID（_zone），页面显示「区服」列 */
-    private static List<Map<String, Object>> markZone(List<Map<String, Object>> rows, int zoneId) {
+    /** 每一行加上目标 key（_target），页面显示「区服」或「节点」列 */
+    private static List<Map<String, Object>> markTarget(List<Map<String, Object>> rows, String key) {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : rows) {
             Map<String, Object> item = new LinkedHashMap<>(row);
-            item.put("_zone", zoneId);
+            item.put("_target", key);
             result.add(item);
         }
         return result;

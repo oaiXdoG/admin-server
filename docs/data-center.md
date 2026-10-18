@@ -10,11 +10,11 @@ admin 不直连业务数据库，而是调用业务服务器按下面规范提�
 | --- | --- | --- |
 | 数据查询 | `data_query` | 选模板，按模板定义的参数填写条件，结果按模板的结果字段成列；点「详情」看完整返回（点表格其他位置不会打开，方便选中复制）；导出按钮 `data_query:export` |
 | 查询模板 | `data_template` | 管理员选数据源和查询名，定义参数和结果字段；可从数据源的查询清单自动带出。按钮 `:create`、`:update`、`:remove` |
-| 数据源 | `data_source` | 每个项目配置业务服务器的查询接口：固定地址，或按区自动发现（多区游戏服只配一次，地址来自游戏服上报）；签名密钥；可测试连接。按钮 `:create`、`:update`、`:remove` |
+| 数据源 | `data_source` | 每个项目配置业务服务器的查询接口：固定地址，或按业务类型发现（同一业务类型的多个区 / 节点只配一次，地址来自服务上报）；签名密钥；可测试连接。按钮 `:create`、`:update`、`:remove` |
 
 ## 二、业务服务器接口规范
 
-业务服务器提供两个 `POST` 接口，地址为数据源里配置的「接口地址」加路径（按区自动发现时为各区游戏服上报的 `innerHost:gmPort`，连接方式为公网时为 `host:gmPort`）：
+业务服务器提供两个 `POST` 接口，地址为数据源里配置的「接口地址」加路径（按业务类型发现时为各区 / 节点上报的 `innerHost:gmPort`，连接方式为公网时为 `host:gmPort`）：
 
 | 路径 | 用途 |
 | --- | --- |
@@ -114,22 +114,30 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 
 ### 数据源
 
-表 `data_source`：`name`（项目内唯一）、`type`、`network`、`url`、`secret`（用 `security.secret-key` AES-GCM 加密保存）、`timeout_ms`（1～60 秒）、`remark`。
+表 `data_source`：`name`（项目内唯一）、`type`、`service_type`、`network`、`url`、`secret`（用 `security.secret-key` AES-GCM 加密保存）、`timeout_ms`（1～60 秒）、`remark`。
 
 `type` 两种：
 
-- `http` 固定地址：`url` 为业务服务器接口地址（登录服、回调服等不分区的服务）。
-- `zone` 按区自动发现（多区游戏服）：`url` 为空。各项目的业务服定时用 HTTP 上报到后台（`POST /api/node/report`，见下文「节点信息上报」），后台按 `App Key → instanceId` 保存在内存里，按区发现只取 `type=logic`（游戏服）的在线记录，区 ID 为上报的 `serverId`，同一个区有多条在线记录时取最近上报的一条；每个区的接口地址按 `network`（连接方式）决定：`inner`（默认，后台和游戏服在同一个内网）为 `http://<上报的 innerHost>:<上报的 gmPort>`，`public`（不在同一个内网）为 `http://<上报的 host>:<上报的 gmPort>`，此时游戏服的 GM 端口要对后台服务器的 IP 开放；`gmPort` 为 0 的区不提供查询接口、不参与查询。可查询的区按区 ID 排序。所有区共用一个签名密钥和同一套查询模板，这个密钥只用于后台调用游戏服 GM 接口（游戏服的 `gm.secret`），上报验签改用项目上报密钥。只能查在线（30 秒内有上报）的区；后台重启后内存表为空，游戏服 10 秒内重新上报补齐。
+- `http` 固定地址：`url` 为业务服务器接口地址，`service_type` 为空串。
+- `discover` 按业务类型发现：`url` 为空，`service_type` 必填（业务类型编码，即进程类型的 `code`、上报的 `type`，只允许 `^[a-z0-9_]{1,32}$`）。各项目的业务服定时用 HTTP 上报到后台（`POST /api/node/report`，见下文「节点信息上报」），后台按 `App Key → instanceId` 保存在内存里。原来的 `zone`（按区自动发现）取消，升级时改为 `discover` + `service_type=logic`。
+
+发现规则（`ServiceDiscoveryService.targets(appKey, serviceType, publicNetwork)`）：
+
+- 取本项目上报中 `type = service_type`、在线（30 秒内有上报）、`gmPort > 0` 的记录；`gmPort` 为 0 的不提供查询接口、不参与查询。
+- 接口地址按 `network`（连接方式）决定：`inner`（默认，后台和服务在同一个内网）为 `http://<上报的 innerHost>:<上报的 gmPort>`，`public`（不在同一个内网）为 `http://<上报的 host>:<上报的 gmPort>`，此时服务的 GM 端口要对后台服务器的 IP 开放。
+- 可查询目标（target）：`service_type = logic`（游戏服）按区，`key` 为区号字符串（上报的 `serverId`，如 `"1"`），按区号数字排序；其他类型按节点，`key` 为上报的 `nodeId`（为空时用 `instanceId`），按 `key` 字符串排序。同一个 `key` 有多条记录时取最近上报的一条。
+- 目标结构 `DataSourceTarget`：`{ key, zoneId, nodeId, url }`，`zoneId` 只有 logic 为区号，其他为 `null`；`nodeId` 为上报的 `nodeId`（未上报为空串）。
+- 所有目标共用一个签名密钥和同一套查询模板，这个密钥只用于后台调用服务的 GM 接口（服务的 `gm.secret`），上报验签用项目上报密钥。后台重启后内存表为空，服务 10 秒内重新上报补齐。
 
 | 接口 | 权限 | 说明 |
 | --- | --- | --- |
-| `POST /api/data/source/list` | `data_source` 或 `data_template` | `{ projectId }` → `{ list }`，不返回密钥，只返回 `secretSet` 和使用中的模板数 `templateCount` |
-| `POST /api/data/source/create` | `data_source:create` | `{ projectId, name, type, network, url, secret, timeoutMs, remark }`，type 为 `http`（默认）或 `zone`，network 为 `inner`（默认）或 `public`，`http` 时 url 必填；密钥必填 |
+| `POST /api/data/source/list` | `data_source` 或 `data_template` | `{ projectId }` → `{ list, serviceTypes }`。`list` 每项不返回密钥，只返回 `secretSet`、使用中的模板数 `templateCount`、`serviceType`、`serviceTypeName`（按 `serviceType` 匹配到的进程类型名称，匹配不到为空串）、`targetCount`（`discover` 类型当前可查询目标数，`http` 为 `null`）；`serviceTypes` 为本项目 `code` 非空的进程类型 `[{ code, name }]`，按 `code` 排序，供数据源表单选择业务类型（只有数据中心权限也能拿到） |
+| `POST /api/data/source/create` | `data_source:create` | `{ projectId, name, type, serviceType, network, url, secret, timeoutMs, remark }`，type 只接受 `http`（默认）或 `discover`，network 为 `inner`（默认）或 `public`；`http` 时 url 必填，`discover` 时 serviceType 必填；密钥必填。返回同 list 的单项 |
 | `POST /api/data/source/update` | `data_source:update` | 另加 `sourceId`；`secret` 留空沿用 |
 | `POST /api/data/source/remove` | `data_source:remove` | `{ projectId, sourceId }`；被模板使用时返回 `100056` |
-| `POST /api/data/source/test` | `data_source:create` 或 `:update` | `{ projectId, sourceId?, type, network, url, secret, timeoutMs }`，调用 `/admin/queries`（`zone` 类型调用第一个可用的区），返回 `{ queryCount, zones }`，`zones` 为发现的区 `[{ zoneId, url }]`（`http` 类型为空列表）；`sourceId` 有值且密钥留空时用已保存的密钥 |
-| `POST /api/data/source/queries` | `data_template` | `{ projectId, sourceId }` → `{ queries }`，原样返回业务服务器的查询清单（`zone` 类型取第一个可用的区） |
-| `POST /api/data/source/zones` | `data_query` 或 `data_template` | `{ projectId, sourceId }` → `{ list }`，`zone` 类型数据源当前可查询的区 `[{ zoneId, url }]`，按区 ID 排序；`http` 类型返回空列表 |
+| `POST /api/data/source/test` | `data_source:create` 或 `:update` | `{ projectId, sourceId?, type, serviceType, network, url, secret, timeoutMs }`，调用 `/admin/queries`（`discover` 类型调用第一个可查询目标，没有可查询目标时返回 `100087`），返回 `{ queryCount, targets }`，`targets` 为发现的目标 `DataSourceTarget[]`（`http` 类型为空列表）；`sourceId` 有值且密钥留空时用已保存的密钥 |
+| `POST /api/data/source/queries` | `data_template` | `{ projectId, sourceId }` → `{ queries }`，原样返回业务服务器的查询清单（`discover` 类型取第一个可查询目标） |
+| `POST /api/data/source/targets` | `data_query` 或 `data_template` | `{ projectId, sourceId }` → `{ list }`，`discover` 类型数据源当前可查询的目标 `DataSourceTarget[]`，排序见发现规则；`http` 类型返回空列表 |
 
 ### 节点信息上报
 
@@ -160,17 +168,17 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 
 | 接口 | 权限 |
 | --- | --- |
-| `POST /api/data/template/list` | `data_template` 或 `data_query`；每条带 `sourceName`、`sourceType`（查询页据此显示区服选择） |
+| `POST /api/data/template/list` | `data_template` 或 `data_query`；每条带 `sourceName`、`sourceType`、`sourceServiceType`（查询页据此显示区服或节点选择：`discover` 且 `logic` 选区服，其他 `discover` 选节点） |
 | `POST /api/data/template/create`、`update`、`remove` | `data_template:create`、`:update`、`:remove` |
 
 ### 数据查询
 
 | 接口 | 权限 | 说明 |
 | --- | --- | --- |
-| `POST /api/data/query` | `data_query` | `{ projectId, templateId, zoneIds, params, page, pageSize }`，`params` 为参数值 JSON 文本；返回 `{ total, list, failures }`，`list` 原样透传 |
+| `POST /api/data/query` | `data_query` | `{ projectId, templateId, targets, params, page, pageSize }`，`params` 为参数值 JSON 文本；返回 `{ total, list, failures }`，`list` 原样透传 |
 | `POST /api/data/query/export` | `data_query:export` | 同上不分页，最多 5 万行 |
 
-`zone` 类型数据源的模板：`zoneIds` 必填（一个或多个区 ID），每一行加上 `_zone`（区 ID）。多个区时同时查询各区，每个区都按同样的 `page`、`pageSize` 取一页，结果按区 ID 顺序合并，`total` 为各区之和；查询失败或已离线的区不影响其他区，记在 `failures`（`[{ zoneId, message }]`）。`http` 类型忽略 `zoneIds`，`failures` 为空。
+`discover` 类型数据源的模板：`targets` 必填且非空（一个或多个目标 `key`，即区号字符串或节点标识；为空时返回 `100061`「请选择区服」/「请选择节点」），每一行加上 `_target`（目标 key）。多个目标时同时查询，每个目标都按同样的 `page`、`pageSize` 取一页，结果按请求里 `targets` 的顺序（去重）合并，`total` 为各目标之和；查询失败或已离线（不在当前发现的目标里）的目标不影响其他目标，记在 `failures`（`[{ target, message }]`，离线时 message 为「不在线」）。`http` 类型忽略 `targets`，`failures` 为空。
 
 参数校验：必填为空返回 `100061`（「请填写「xxx」」）；数字、时间无法解析，是/否不是 true/false，下拉值不在选项里，文本超过 512 字，都返回 `100061`。
 
@@ -184,7 +192,7 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 | `100057` | 业务数据源请求失败，消息里附带原因（无法连接、HTTP 状态、业务返回的 code 和 message 等） |
 | `100058` / `100059` / `100060` | 查询模板不存在 / 名称已存在 / 配置不合法 |
 | `100061` | 查询参数不合法 |
-| `100087` | 没有可用的区服（游戏服都不在线，或没有提供查询接口） |
+| `100087` | 没有可查询的节点（需要在线且 GM 端口不为 0） |
 | `100088` | 节点信息上报验签失败 |
 
 ### 安全约定

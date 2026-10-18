@@ -22,7 +22,7 @@ import com.oaixdog.adminbackground.protocol.DataQueryRequest;
 import com.oaixdog.adminbackground.protocol.DataSourceCreateRequest;
 import com.oaixdog.adminbackground.protocol.DataSourceListRequest;
 import com.oaixdog.adminbackground.protocol.DataSourceQueriesRequest;
-import com.oaixdog.adminbackground.protocol.DataSourceZonesRequest;
+import com.oaixdog.adminbackground.protocol.DataSourceTargetsRequest;
 import com.oaixdog.adminbackground.protocol.DataSourceRemoveRequest;
 import com.oaixdog.adminbackground.protocol.DataSourceTestRequest;
 import com.oaixdog.adminbackground.protocol.DataSourceUpdateRequest;
@@ -224,7 +224,7 @@ public class Application {
                 case "POST /api/data/source/remove" -> parseRequest(rawRequest, DataSourceRemoveRequest.class);
                 case "POST /api/data/source/test" -> parseRequest(rawRequest, DataSourceTestRequest.class);
                 case "POST /api/data/source/queries" -> parseRequest(rawRequest, DataSourceQueriesRequest.class);
-                case "POST /api/data/source/zones" -> parseRequest(rawRequest, DataSourceZonesRequest.class);
+                case "POST /api/data/source/targets" -> parseRequest(rawRequest, DataSourceTargetsRequest.class);
                 case "POST /api/data/template/list" -> parseRequest(rawRequest, DataTemplateListRequest.class);
                 case "POST /api/data/template/create" -> parseRequest(rawRequest, DataTemplateCreateRequest.class);
                 case "POST /api/data/template/update" -> parseRequest(rawRequest, DataTemplateUpdateRequest.class);

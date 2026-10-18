@@ -7,7 +7,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @Protocol(id = 3132)
-public class DataSourceZonesRequest {
+public class DataSourceTargetsRequest {
 
     private Long projectId;
     private Long sourceId;
