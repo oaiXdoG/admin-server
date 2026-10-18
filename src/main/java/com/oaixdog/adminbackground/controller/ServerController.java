@@ -21,6 +21,9 @@ import com.oaixdog.adminbackground.protocol.ServerProcessTypeRemoveRequest;
 import com.oaixdog.adminbackground.protocol.ServerProcessTypeSaveRequest;
 import com.oaixdog.adminbackground.protocol.ServerProcessUpdateRequest;
 import com.oaixdog.adminbackground.protocol.ServerMetricQueryRequest;
+import com.oaixdog.adminbackground.protocol.ServerNodeUnmanagedRequest;
+import com.oaixdog.adminbackground.protocol.ServerReportConfigRequest;
+import com.oaixdog.adminbackground.protocol.ServerReportConfigResetRequest;
 import com.oaixdog.adminbackground.protocol.ServerTaskListRequest;
 import com.oaixdog.adminbackground.protocol.ServerTemplateListRequest;
 import com.oaixdog.adminbackground.protocol.ServerTemplateRemoveRequest;
@@ -152,7 +155,22 @@ public class ServerController {
 
     @PacketReceiver
     public void atServerProcessTypeSaveRequest(Session session, ServerProcessTypeSaveRequest request, HttpAttachment attachment) {
-        handle(session, attachment, request, () -> typeService.save(auth(attachment), request.getProjectId(), request.getTypeId(), request.getName()));
+        handle(session, attachment, request, () -> typeService.save(auth(attachment), request.getProjectId(), request.getTypeId(), request.getName(), request.getCode()));
+    }
+
+    @PacketReceiver
+    public void atServerNodeUnmanagedRequest(Session session, ServerNodeUnmanagedRequest request, HttpAttachment attachment) {
+        handle(session, attachment, request, () -> Map.of("list", processService.unmanaged(auth(attachment), request.getProjectId())));
+    }
+
+    @PacketReceiver
+    public void atServerReportConfigRequest(Session session, ServerReportConfigRequest request, HttpAttachment attachment) {
+        handle(session, attachment, request, () -> processService.reportConfig(auth(attachment), request.getProjectId()));
+    }
+
+    @PacketReceiver
+    public void atServerReportConfigResetRequest(Session session, ServerReportConfigResetRequest request, HttpAttachment attachment) {
+        handle(session, attachment, request, () -> processService.resetReportConfig(auth(attachment), request.getProjectId()));
     }
 
     @PacketReceiver

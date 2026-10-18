@@ -55,10 +55,12 @@
 | `/api/server/host/list` | 项目 `server_host` 或 `server_process` |
 | `/api/server/metric/query` | 项目 `server_monitor` |
 | `/api/server/host/create`、`update`、`install`、`remove` | `server_host:create`、`:update`、`:update`、`:remove` |
-| `/api/server/process/list`、`/api/server/task/list`、`/api/server/template/list` | 项目 `server_process` |
+| `/api/server/process/list`、`/api/server/task/list`、`/api/server/template/list`、`/api/server/node/unmanaged` | 项目 `server_process` |
 | `/api/server/process/create`、`update`、`remove`、`operate` | `server_process:create`、`:update`、`:remove`、`:operate` |
 | `/api/server/template/save`、`remove` | `server_process:update` |
+| `/api/server/report-config`、`/api/server/report-config/reset` | `server_process:update` |
 | `/api/agent/register`、`heartbeat`、`result` | 不需要登录：注册用一次性安装令牌，心跳和结果按服务器密钥验签 |
+| `/api/node/report` | 不需要登录：业务服按项目上报密钥验签 |
 | `/api/data/source/list` | 项目 `data_source` 或 `data_template` |
 | `/api/data/source/create`、`update`、`remove` | `data_source:create`、`:update`、`:remove` |
 | `/api/data/source/test` | `data_source:create` 或 `data_source:update` |

@@ -16,6 +16,8 @@ public class ServerProcessType {
     private Long id;
     private Long projectId;
     private String name;
+    /** 业务类型编码，与业务服上报的 type 对应；为空表示不参与绑定 */
+    private String code;
     private Long createdAt;
     private Long updatedAt;
 }

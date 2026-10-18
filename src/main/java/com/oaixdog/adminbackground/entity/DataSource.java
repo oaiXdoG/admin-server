@@ -13,7 +13,7 @@ import lombok.Setter;
 public class DataSource {
 
     public static final String TYPE_HTTP = "http";
-    /** 按区自动发现：地址取自游戏服上报（NodeInfoReportService），url 为空；密钥同时用于校验游戏服上报的签名 */
+    /** 按区自动发现：地址取自游戏服上报（NodeInfoReportService），url 为空；密钥只用于调用游戏服 GM 接口，上报验签用项目上报密钥 */
     public static final String TYPE_ZONE = "zone";
     /** 按区自动发现时的连接方式：inner 用上报的内网地址，public 用上报的公网地址（后台和游戏服不在同一个内网时） */
     public static final String NETWORK_INNER = "inner";

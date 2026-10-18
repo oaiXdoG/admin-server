@@ -39,7 +39,7 @@ import java.util.concurrent.TimeUnit;
  */
 public final class AgentMain {
 
-    static final String VERSION = "0.3.2";
+    static final String VERSION = "0.4.0";
     private static final int HEARTBEAT_SECONDS = 5;
     /** 长轮询：后台最长挂起 25 秒，请求超时要比它长；失败后隔几秒再试 */
     private static final int WAIT_TIMEOUT_SECONDS = 40;
@@ -187,7 +187,10 @@ public final class AgentMain {
         return result;
     }
 
-    /** 服务文件内容与后台不同时写入并 daemon-reload；后台已删除的进程只在收到 remove 指令时才删除服务文件 */
+    /**
+     * 服务文件、环境变量文件内容与后台不同时写入并 daemon-reload；后台已删除的进程只在收到 remove 指令时才删除这两个文件。
+     * 环境变量文件为后台下发的 env（ADM_INSTANCE_ID、ADM_REPORT_SECRET）加上 ADM_REPORT_URL（本 Agent 的后台地址，Agent 能连上就一定可达）
+     */
     private void syncDefinitions(JsonNode processes) throws IOException {
         Map<Long, Definition> latest = new HashMap<>();
         boolean changed = false;
@@ -195,6 +198,12 @@ public final class AgentMain {
             Definition definition = new Definition(node.path("processId").asLong(), node.path("name").asText(), node.path("configVersion").asInt(),
                     node.path("port").asInt(), node.path("workDir").asText(), node.path("runUser").asText(), node.path("unit").asText());
             changed |= Systemd.writeUnit(definition.name(), definition.unit());
+            if (node.path("env").isObject()) {
+                Map<String, String> env = new LinkedHashMap<>();
+                node.path("env").fields().forEachRemaining(entry -> env.put(entry.getKey(), entry.getValue().asText()));
+                env.put("ADM_REPORT_URL", baseUrl() + "/api/node/report");
+                changed |= Systemd.writeEnv(definition.name(), env);
+            }
             latest.put(definition.processId(), definition);
         }
         if (changed) {

@@ -15,7 +15,7 @@ import io.netty.handler.codec.http.HttpResponseStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
-/** 节点调用的接口：定时上报节点信息。不需要登录，按项目「按区自动发现」数据源的密钥验签 */
+/** 业务服调用的接口：定时上报节点信息。不需要登录，按项目上报密钥验签 */
 @Component
 @RequiredArgsConstructor
 public class NodeInfoReportController {

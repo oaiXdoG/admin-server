@@ -99,6 +99,7 @@ public class OperationLogService {
             Map.entry("/api/server/template/remove", "删除 JVM 参数模板"),
             Map.entry("/api/server/process-type/save", "保存进程类型"),
             Map.entry("/api/server/process-type/remove", "删除进程类型"),
+            Map.entry("/api/server/report-config/reset", "重置上报密钥"),
             Map.entry("/api/server/process/deploy", "部署进程"),
             Map.entry("/api/server/process/file/request", "进程文件操作"),
             Map.entry("/api/data/source/create", "新建数据源"),

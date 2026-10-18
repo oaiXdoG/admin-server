@@ -114,6 +114,9 @@ import com.oaixdog.adminbackground.protocol.ServerDeployUploadRequest;
 import com.oaixdog.adminbackground.protocol.ServerDeployRequest;
 import com.oaixdog.adminbackground.protocol.ServerFileRequest;
 import com.oaixdog.adminbackground.protocol.ServerFileResultRequest;
+import com.oaixdog.adminbackground.protocol.ServerNodeUnmanagedRequest;
+import com.oaixdog.adminbackground.protocol.ServerReportConfigRequest;
+import com.oaixdog.adminbackground.protocol.ServerReportConfigResetRequest;
 import com.oaixdog.adminbackground.protocol.AgentPackageRequest;
 import com.oaixdog.adminbackground.protocol.AgentFileResultRequest;
 import com.oaixdog.adminbackground.protocol.AgentWaitRequest;
@@ -262,7 +265,10 @@ public class Application {
                 case "POST /api/agent/package" -> parseAgentRequest(rawRequest, AgentPackageRequest.class);
                 case "POST /api/agent/file-result" -> parseAgentRequest(rawRequest, AgentFileResultRequest.class);
                 case "POST /api/agent/wait" -> parseAgentRequest(rawRequest, AgentWaitRequest.class);
-                case "POST /api/node/report" -> parseAgentRequest(rawRequest, NodeInfoReportRequest.class);
+                case "POST /api/node/report" -> parseNodeReportRequest(rawRequest);
+                case "POST /api/server/node/unmanaged" -> parseRequest(rawRequest, ServerNodeUnmanagedRequest.class);
+                case "POST /api/server/report-config" -> parseRequest(rawRequest, ServerReportConfigRequest.class);
+                case "POST /api/server/report-config/reset" -> parseRequest(rawRequest, ServerReportConfigResetRequest.class);
                 default -> new RuntimeException("Unknown route: " + route);
             };
 
@@ -288,6 +294,13 @@ public class Application {
         String body = rawRequest.content().toString(StandardCharsets.UTF_8);
         rawRequest.headers().set(AgentService.BODY_DIGEST_HEADER, AgentService.digest(body));
         return parseRequest(rawRequest, requestClass);
+    }
+
+    /** 节点信息上报：除验签用的摘要外，把原始请求体也带给控制器，页面显示原始上报 */
+    private static NodeInfoReportRequest parseNodeReportRequest(FullHttpRequest rawRequest) {
+        NodeInfoReportRequest request = parseAgentRequest(rawRequest, NodeInfoReportRequest.class);
+        request.setRaw(rawRequest.content().toString(StandardCharsets.UTF_8));
+        return request;
     }
 
     private static <T> T parseRequest(FullHttpRequest rawRequest, Class<T> requestClass) {

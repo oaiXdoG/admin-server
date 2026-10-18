@@ -135,6 +135,9 @@
         <protocol location="com.oaixdog.adminbackground.protocol.DataSourceZonesRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.ServerMetricQueryRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.NodeInfoReportRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.ServerNodeUnmanagedRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.ServerReportConfigRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.ServerReportConfigResetRequest"/>
     </module>
 
 </protocols>

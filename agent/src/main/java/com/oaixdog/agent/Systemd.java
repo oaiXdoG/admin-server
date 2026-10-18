@@ -6,16 +6,21 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-/** 托管进程的 systemd 操作：服务名 adm-<进程名>，服务文件在 /etc/systemd/system 下，内容由后台生成 */
+/**
+ * 托管进程的 systemd 操作：服务名 adm-<进程名>，服务文件在 /etc/systemd/system 下，内容由后台生成；
+ * 环境变量文件 /etc/admin-agent/env/adm-<进程名>.env 内容为后台下发的 env 加上 ADM_REPORT_URL
+ */
 final class Systemd {
 
     private static final Path UNIT_DIR = Path.of("/etc/systemd/system");
+    private static final Path ENV_DIR = Path.of("/etc/admin-agent/env");
     private static final int START_WAIT_SECONDS = 180;
     private static final int STABLE_SECONDS = 3;
 
@@ -35,6 +40,28 @@ final class Systemd {
         if (Files.exists(file) && Files.readString(file, StandardCharsets.UTF_8).equals(content)) {
             return false;
         }
+        Files.writeString(file, content, StandardCharsets.UTF_8);
+        return true;
+    }
+
+    static Path envFile(String processName) {
+        return ENV_DIR.resolve("adm-" + processName + ".env");
+    }
+
+    /** 进程环境变量文件（服务文件用 EnvironmentFile=- 引用，里面有上报密钥，只允许 root 读写），内容不同时写入，返回是否写入 */
+    static boolean writeEnv(String processName, Map<String, String> env) throws IOException {
+        StringBuilder builder = new StringBuilder();
+        env.forEach((key, value) -> builder.append(key).append('=').append(value).append('\n'));
+        String content = builder.toString();
+        Path file = envFile(processName);
+        if (Files.exists(file) && Files.readString(file, StandardCharsets.UTF_8).equals(content)) {
+            return false;
+        }
+        Files.createDirectories(ENV_DIR);
+        if (!Files.exists(file)) {
+            Files.createFile(file, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+        }
+        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
         Files.writeString(file, content, StandardCharsets.UTF_8);
         return true;
     }
@@ -111,13 +138,14 @@ final class Systemd {
         return new Result(command.success() && stopped, command.output() + (stopped ? "已停止\n" : "停止后状态：" + state + "\n") + diagnose(unit));
     }
 
-    /** 停止、禁用并删除服务文件，不删除工作目录 */
+    /** 停止、禁用并删除服务文件和环境变量文件，不删除工作目录 */
     static Result remove(String processName) throws IOException {
         String unit = unitName(processName);
         StringBuilder output = new StringBuilder();
         output.append(run(120, "systemctl", "stop", unit).output());
         output.append(run(30, "systemctl", "disable", unit).output());
         Files.deleteIfExists(UNIT_DIR.resolve(unit));
+        Files.deleteIfExists(envFile(processName));
         daemonReload();
         return new Result(true, output.append("已删除服务 ").append(unit).append('\n').toString());
     }

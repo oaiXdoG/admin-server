@@ -119,7 +119,7 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 `type` 两种：
 
 - `http` 固定地址：`url` 为业务服务器接口地址（登录服、回调服等不分区的服务）。
-- `zone` 按区自动发现（多区游戏服）：`url` 为空。各项目的游戏服定时用 HTTP 上报到后台（`POST /api/node/report`，见下文「节点信息上报」），后台按 `App Key → serverId（区 ID）` 保存在内存里；每个区的接口地址按 `network`（连接方式）决定：`inner`（默认，后台和游戏服在同一个内网）为 `http://<上报的 innerHost>:<上报的 gmPort>`，`public`（不在同一个内网）为 `http://<上报的 host>:<上报的 gmPort>`，此时游戏服的 GM 端口要对后台服务器的 IP 开放；`gmPort` 为 0 的区不提供查询接口、不参与查询。可查询的区按区 ID 排序。所有区共用一个签名密钥和同一套查询模板，这个密钥同时用于校验游戏服的上报（游戏服的 `gm.secret`）。只能查在线（30 秒内有上报）的区；后台重启后内存表为空，游戏服 10 秒内重新上报补齐。
+- `zone` 按区自动发现（多区游戏服）：`url` 为空。各项目的业务服定时用 HTTP 上报到后台（`POST /api/node/report`，见下文「节点信息上报」），后台按 `App Key → instanceId` 保存在内存里，按区发现只取 `type=logic`（游戏服）的在线记录，区 ID 为上报的 `serverId`，同一个区有多条在线记录时取最近上报的一条；每个区的接口地址按 `network`（连接方式）决定：`inner`（默认，后台和游戏服在同一个内网）为 `http://<上报的 innerHost>:<上报的 gmPort>`，`public`（不在同一个内网）为 `http://<上报的 host>:<上报的 gmPort>`，此时游戏服的 GM 端口要对后台服务器的 IP 开放；`gmPort` 为 0 的区不提供查询接口、不参与查询。可查询的区按区 ID 排序。所有区共用一个签名密钥和同一套查询模板，这个密钥只用于后台调用游戏服 GM 接口（游戏服的 `gm.secret`），上报验签改用项目上报密钥。只能查在线（30 秒内有上报）的区；后台重启后内存表为空，游戏服 10 秒内重新上报补齐。
 
 | 接口 | 权限 | 说明 |
 | --- | --- | --- |
@@ -133,12 +133,12 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 
 ### 节点信息上报
 
-`POST /api/node/report`：游戏服调用，不需要登录，按签名鉴权（规则见 danmu-login `docs/service-discovery.md` 第 7 节）。上报地址（游戏服 `admin.report-url`）为后台对外地址加 `/api/node/report`，游戏服所在服务器要能访问到。游戏服就绪后立即上报一次，之后每 10 秒一次。
+`POST /api/node/report`：登录服、回调服、游戏服等业务服调用，不需要登录，按项目上报密钥签名鉴权（详见 `docs/服务发现改造.md`）。后台托管的进程由 Agent 注入上报地址 `ADM_REPORT_URL`、密钥 `ADM_REPORT_SECRET`、实例 ID `ADM_INSTANCE_ID`（见 `docs/server-management.md`「服务绑定」）；手动配置时地址和密钥在进程管理「上报配置」里查看。业务服就绪后立即上报一次，之后每 10 秒一次。
 
 请求体：
 
 ```json
-{ "serverId": 1, "instanceId": "…", "host": "111.230.143.165", "port": 9020, "innerHost": "10.0.0.8", "gmPort": 9021 }
+{ "type": "logic", "nodeId": "logic-1", "instanceId": "12", "serverId": 1, "host": "111.230.143.165", "port": 9020, "innerHost": "10.0.0.8", "gmPort": 9021 }
 ```
 
 请求头：
@@ -149,9 +149,9 @@ if (!MessageDigest.isEqual(expected.getBytes(), request.getHeader("X-Admin-Signa
 | `X-Admin-Timestamp` | 毫秒时间戳 |
 | `X-Admin-Signature` | `hex(HMAC-SHA256(密钥, 时间戳 + "\n" + hex(SHA256(请求体))))`，小写十六进制 |
 
-- 验签：按 `X-Admin-Project` 找项目，取该项目所有 `zone` 类型数据源的密钥，任一密钥算出的签名相同即通过；App Key 不存在、项目没有 `zone` 数据源、签名不对、时间戳与后台相差超过 5 分钟都返回 `100088`，不保存。拒绝时打印警告（App Key、serverId、来源 IP、原因），同一 App Key + 来源 IP 每分钟最多一次。
-- 参数：`serverId > 0`；`instanceId`、`host`、`innerHost` 非空；`port`、`gmPort` 在 0～65535；不合法返回 `100001`。请求体里不认识的字段忽略（节点新增字段时后台不用先升级）。
-- 成功返回 `data: null`。每次上报直接覆盖该区的记录（区 ID 冲突由登录服、回调服拦截），记录不删除，30 秒内有上报视为在线。
+- 验签：按 `X-Admin-Project` 找项目，用项目上报密钥（`project.report_secret`）验签，不再读数据源密钥；App Key 不存在、项目还没有上报密钥、签名不对、时间戳与后台相差超过 5 分钟都返回 `100088`，不保存。拒绝时打印警告（App Key、instanceId、来源 IP、原因），同一 App Key + 来源 IP 每分钟最多一次。
+- 参数：`type` 非空；`type=logic` 时 `serverId > 0`（其他类型可空）；`instanceId`、`host`、`innerHost` 非空；`port`、`gmPort` 在 0～65535；不合法返回 `100001`。请求体里不认识的字段忽略（节点新增字段时后台不用先升级），原始请求体保存下来在页面显示。
+- 成功返回 `data: null`。按 `instanceId` 覆盖记录（区 ID 冲突由登录服、回调服拦截），30 秒内有上报视为在线；超过 1 天没有上报的记录在该项目下次收到上报时清掉。
 - 记录在后台进程内存里，后台按单进程部署；以后多实例部署时要改为放 Redis。
 
 ### 查询模板

@@ -39,7 +39,8 @@
 | jar | 启动 jar（`-jar` 方式），相对工作目录或绝对路径 |
 | classpath / mainClass | `-cp` 方式：填了主类时用 `-cp <classpath> <主类>` 启动、不使用 jar，例如 `conf:lib/*:loginServer.jar` 和 `com.oaixdog.loginserver.Application`；`lib/*` 原样交给 java 展开 |
 | programArgs | 程序参数，可空 |
-| env | 环境变量，每行 `KEY=VALUE`，可空 |
+| typeId | 进程类型，必填 |
+| env | 环境变量，每行 `KEY=VALUE`，可空；不允许 `ADM_` 开头（后台注入用，见下文「服务绑定」），否则返回 `100001` |
 | runUser | 运行用户，空为 root（建议用普通用户） |
 | port | 启动后检查的端口，0 表示不检查 |
 
@@ -54,6 +55,7 @@ After=network.target
 Type=simple
 User=<runUser>
 WorkingDirectory=<workDir>
+EnvironmentFile=-/etc/admin-agent/env/adm-<name>.env
 Environment="KEY=VALUE"
 ExecStart=<javaPath> <模板参数> <jvmOptions> -jar <jar> <programArgs>
 # 或 -cp 方式：ExecStart=<javaPath> <模板参数> <jvmOptions> -cp <classpath> <mainClass> <programArgs>
@@ -69,7 +71,41 @@ WantedBy=multi-user.target
 - 进程定义修改后 `configVersion` 加 1，Agent 在下一次心跳时更新服务文件（`systemctl daemon-reload`），**重启后生效**；运行中且启动时的版本低于当前版本的进程显示「待重启」。
 - 启动 / 重启：`systemctl enable` + `start/restart`，然后最多等 180 秒确认服务处于运行状态（配置了端口时同时确认端口可连），失败时附上 `systemctl status` 和最近 30 行 journal 日志。
 - 停止：`systemctl stop`，先发 SIGTERM，60 秒未退出再 SIGKILL。
-- 删除进程：只能删除已停止的进程；后台下发 `remove` 指令，Agent 禁用并删除服务文件，不删除工作目录。
+- 删除进程：只能删除已停止的进程；后台下发 `remove` 指令，Agent 禁用并删除服务文件和环境变量文件，不删除工作目录。
+
+### 服务绑定（注入的环境变量）
+
+业务服（登录服、回调服、游戏服）定时调用 `POST /api/node/report` 上报自己的信息（字段和验签见 `docs/服务发现改造.md`）。后台托管的进程启动时由 Agent 注入以下环境变量，业务服读到就用它们上报，配置文件里不需要写后台相关的东西：
+
+| 变量 | 值 | 来源 |
+| --- | --- | --- |
+| `ADM_INSTANCE_ID` | 后台进程 ID，例如 `12`；业务服作为上报的 `instanceId` | 后台随进程定义下发 |
+| `ADM_REPORT_SECRET` | 项目上报密钥明文 | 后台随进程定义下发 |
+| `ADM_REPORT_URL` | `<Agent 的 baseUrl>/api/node/report` | Agent 自己拼 |
+
+- 变量写在每个进程自己的文件 `/etc/admin-agent/env/adm-<name>.env`（权限 0600，Agent 0.4.0 起），服务文件用 `EnvironmentFile=-` 引用（带 `-`，文件不存在也能启动，只是不上报）。密钥不出现在服务文件和 `systemctl show` 里。
+- 文件内容变化时与服务文件一样 `daemon-reload`；已运行的进程**重启后**才带上新变量（重置上报密钥后同样要重启）。
+- 进程表单里的环境变量不允许 `ADM_` 开头。
+- 不是后台启动的进程读不到这些变量，可以手动配置上报地址和密钥上报（「上报配置」），显示在「未托管服务」里。
+
+### 服务状态
+
+进程列表每项带 `typeCode`（类型编码，没有类型或类型没有编码时为空字符串）和 `service`（类型没有编码时为 null）：
+
+```json
+{
+  "status": "online",          // online / not_ready / mismatch / offline
+  "type": "logic", "nodeId": "logic-1", "instanceId": "12", "serverId": 1,
+  "host": "111.230.143.165", "port": 9020, "innerHost": "10.0.0.8", "gmPort": 9021,
+  "reportTime": 1760000000000,  // 毫秒，没有上报为 0
+  "raw": { }                    // 原始上报对象，没有上报为 null
+}
+```
+
+- 进程运行中（`state` 为 `active`）且 30 秒内有该进程 ID（`instanceId`）的上报 → `online`；上报的 `type` 与类型编码不同 → `mismatch`；
+- 运行中但没有 30 秒内的上报 → `not_ready`；
+- 进程未运行（含服务器离线）→ `offline`；
+- 只要还有该实例最后一次上报，就带上 `type`、`reportTime` 等字段；没有上报时字符串字段为空、端口为 0、`serverId` 为 null。
 
 ## 三、监控
 
@@ -94,7 +130,9 @@ Agent 每 5 秒随心跳上报：
 
 ### 进程类型
 
-项目内自定义的分类（例如 登录服、游戏服、回调服），表 `server_process_type`。进程可选一个类型（`server_process.type_id`，可空），列表按类型筛选。有进程在用的类型不能删除。
+项目内自定义的分类（例如 登录服、游戏服、回调服），表 `server_process_type`。进程必须选一个类型（`server_process.type_id`；库里旧数据可能为空），列表按类型筛选。有进程在用的类型不能删除。
+
+业务类型编码 `code`：与业务服上报的 `type` 对应（登录服 `login`、回调服 `callback`、游戏服 `logic`），只允许小写字母、数字、下划线，最长 32，项目内非空时唯一；为空表示该类型的进程不参与服务绑定（不显示服务状态）。
 
 ### 部署（始终增量覆盖）
 
@@ -131,13 +169,16 @@ Agent 每 5 秒随心跳上报：
 | `POST /api/server/host/update` | `server_host:update` | `{ projectId, serverId, name, groupName, remark }` → 服务器 |
 | `POST /api/server/host/remove` | `server_host:remove` | `{ projectId, serverId }`；服务器下还有进程时不能删除 |
 | `POST /api/server/host/install` | `server_host:update` | `{ projectId, serverId }` → `{ installCommand }`，生成新的一次性令牌 |
-| `POST /api/server/process/list` | `server_process` | `{ projectId }` → `{ list }`，每项含定义（含 `typeId`、`typeName`）、最近一次成功部署 `deployedAt`、`deployRemark`、`state`（`active` / `inactive` / `failed` / `activating` / `deactivating` / `unknown`，服务器离线时为 `unknown`）、`pendingRestart`、`metric`、`task`（未完成的指令） |
-| `POST /api/server/process/create` | `server_process:create` | 进程字段（含可空的 `typeId`）+ `{ projectId, serverId }` → 进程 |
+| `POST /api/server/process/list` | `server_process` | `{ projectId }` → `{ list }`，每项含定义（含 `typeId`、`typeName`、`typeCode`）、最近一次成功部署 `deployedAt`、`deployRemark`、`state`（`active` / `inactive` / `failed` / `activating` / `deactivating` / `unknown`，服务器离线时为 `unknown`）、`pendingRestart`、`metric`、`task`（未完成的指令）、`service`（服务状态，见上文） |
+| `POST /api/server/process/create` | `server_process:create` | 进程字段（含必填的 `typeId`）+ `{ projectId, serverId }` → 进程 |
 | `POST /api/server/process/update` | `server_process:update` | 进程字段（不含 name、serverId）+ `{ projectId, processId }` → 进程 |
 | `POST /api/server/process/remove` | `server_process:remove` | `{ projectId, processId }` |
 | `POST /api/server/process/operate` | `server_process:operate` | `{ projectId, processIds, action }`，action 为 `start` / `stop` / `restart`，一次最多 50 个 → `{ taskIds }` |
-| `POST /api/server/process-type/list` | `server_process` | `{ projectId }` → `{ list }`，每项 `{ id, name, processCount }` |
-| `POST /api/server/process-type/save` | `server_process:update` | `{ projectId, typeId, name }`，typeId 为空表示新建，名称 1～32 字 → 类型 |
+| `POST /api/server/process-type/list` | `server_process` | `{ projectId }` → `{ list }`，每项 `{ id, name, code, processCount }` |
+| `POST /api/server/process-type/save` | `server_process:update` | `{ projectId, typeId, name, code }`，typeId 为空表示新建，名称 1～32 字，code 可空（规则见上文）→ 类型 |
+| `POST /api/server/node/unmanaged` | `server_process` | `{ projectId }` → `{ list }`：未托管服务，即本项目上报里 `instanceId` 对应不到本项目任何进程的记录（含离线，超过 1 天没有上报的会被清掉），按 `reportTime` 倒序。每项 `{ type, nodeId, instanceId, serverId, host, port, innerHost, gmPort, reportTime, online, serverName, raw }`：`online` 为 30 秒内有上报，`serverName` 为 `innerHost` 匹配到的本项目服务器（服务器内网 IP 可能有多个，逗号分隔，任一相同即匹配；匹配不到为空字符串） |
+| `POST /api/server/report-config` | `server_process:update` | `{ projectId }` → `{ appKey, reportUrl, secret }`：手动配置上报时用。`reportUrl` 为 `agent.base-url` + `/api/node/report`（未配置 `agent.base-url` 时为空字符串）；`secret` 为项目上报密钥明文，还没有时自动生成 |
+| `POST /api/server/report-config/reset` | `server_process:update` | `{ projectId }` → 同上：重新生成上报密钥，旧密钥立即失效；托管进程的环境变量文件在下次心跳时更新，重启后生效，手动配置的服务要改配置。记操作日志（只记 projectId） |
 | `POST /api/server/process-type/remove` | `server_process:update` | `{ projectId, typeId }`；有进程在用时不能删除 |
 | `POST /api/server/process/deploy/upload` | `server_process:deploy` | `{ projectId, processId, uploadId, index, total, data }`：第一块 uploadId 为空，之后带上返回的 uploadId；index 从 0 开始按顺序上传，data 为该块的 base64（解码后不超过 6MB），total 不超过 64 → `{ uploadId }`。上传 1 小时内有效 |
 | `POST /api/server/process/deploy` | `server_process:deploy` | `{ projectId, processId, uploadId, fileName, remark }`，所有块上传完成后调用；校验是 zip 且不为空，服务器在线、进程没有未完成的指令 → `{ taskId }` |
@@ -149,7 +190,7 @@ Agent 每 5 秒随心跳上报：
 | `POST /api/server/template/save` | `server_process:update` | `{ projectId, templateId, name, options }`，templateId 为空表示新建 → 模板 |
 | `POST /api/server/template/remove` | `server_process:update` | `{ projectId, templateId }`；有进程在用时不能删除 |
 
-错误码：`100080` 进程类型不存在、`100081` 进程类型名称已存在、`100082` 进程类型正在使用、`100083` 发布包上传无效或已过期、`100084` 发布包不是有效的 zip 或为空、`100085` 文件操作不存在或已过期、`100065` 服务器不存在、`100066` 服务器名称已存在、`100067` 服务器下还有进程、`100068` 服务器离线、`100069` 进程不存在、`100070` 进程名已存在、`100071` 进程配置不合法、`100072` 进程有未完成的指令、`100073` 进程未停止、`100074` JVM 模板不存在、`100075` JVM 模板名称已存在、`100076` JVM 模板正在使用、`100077` 安装令牌无效、`100078` Agent 签名无效、`100079` 监控数据不可用（未配置 ClickHouse 管理账号）。
+错误码：`100001` 请求参数不合法（含进程没选类型、环境变量 `ADM_` 开头、类型编码格式不对）、`100080` 进程类型不存在、`100081` 进程类型名称已存在、`100082` 进程类型正在使用、`100089` 进程类型编码已存在、`100083` 发布包上传无效或已过期、`100084` 发布包不是有效的 zip 或为空、`100085` 文件操作不存在或已过期、`100065` 服务器不存在、`100066` 服务器名称已存在、`100067` 服务器下还有进程、`100068` 服务器离线、`100069` 进程不存在、`100070` 进程名已存在、`100071` 进程配置不合法、`100072` 进程有未完成的指令、`100073` 进程未停止、`100074` JVM 模板不存在、`100075` JVM 模板名称已存在、`100076` JVM 模板正在使用、`100077` 安装令牌无效、`100078` Agent 签名无效、`100079` 监控数据不可用（未配置 ClickHouse 管理账号）。
 
 ### Agent 接口
 
@@ -158,7 +199,7 @@ Agent 每 5 秒随心跳上报：
 | 接口 | 请求 → 返回 |
 | --- | --- |
 | `POST /api/agent/register` | `{ token, hostname, os, privateIp, cpuCores, memoryTotal, agentVersion }` → `{ serverId, secret }` |
-| `POST /api/agent/heartbeat` | `{ hostname, os, privateIp, cpuCores, memoryTotal, agentVersion, host, processes }` → `{ processes, tasks }`：`processes` 为本服务器全部进程定义（含合并后的 JVM 参数和 `configVersion`），`tasks` 为本次领取的指令 `{ taskId, processId, processName, action, param }`（部署指令的 param 为 `{ size, sha256, chunks }`），`fileOps` 为本次领取的文件操作 `{ opId, processId, op, path, content }`；进程定义含 `workDir`、`runUser` |
+| `POST /api/agent/heartbeat` | `{ hostname, os, privateIp, cpuCores, memoryTotal, agentVersion, host, processes }` → `{ processes, tasks }`：`processes` 为本服务器全部进程定义（含合并后的 JVM 参数和 `configVersion`），`tasks` 为本次领取的指令 `{ taskId, processId, processName, action, param }`（部署指令的 param 为 `{ size, sha256, chunks }`），`fileOps` 为本次领取的文件操作 `{ opId, processId, op, path, content }`；进程定义含 `workDir`、`runUser`、`unit`（服务文件内容）、`env`（`{ "ADM_INSTANCE_ID": "<进程 ID>", "ADM_REPORT_SECRET": "<项目上报密钥>" }`，Agent 0.4.0 起写入环境变量文件并补上 `ADM_REPORT_URL`） |
 | `POST /api/agent/wait` | `{ agentVersion }` → `{ tasks, fileOps }`（格式同心跳）：有待执行的指令或文件操作时立即返回，否则挂起，页面发起指令时立即返回，25 秒仍没有则返回空列表；Agent 收到后立即发起下一次。0.3.0 起心跳请求带 `longPoll: true`，后台不再随心跳下发指令 |
 | `POST /api/agent/package` | `{ taskId, index }` → `{ data }`：部署指令的发布包第 index 块（6MB，base64），只能下载本服务器执行中的部署指令 |
 | `POST /api/agent/file-result` | `{ opId, success, message, data }` → `null` |

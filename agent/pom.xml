@@ -6,7 +6,7 @@
 
     <groupId>com.oaixdog</groupId>
     <artifactId>admin-agent</artifactId>
-    <version>0.3.2</version>
+    <version>0.4.0</version>
     <name>admin-agent</name>
     <description>服务器管理 Agent：托管业务进程（systemd）、执行后台指令、上报监控</description>
 
