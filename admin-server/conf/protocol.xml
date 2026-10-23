@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<protocols>
+    <module id="1" name="native">
+        <protocol location="com.zfoo.net.router.attachment"/>
+    </module>
+
+    <module id="2" name="common">
+        <protocol location="com.zfoo.net.packet.common.Message"/>
+        <protocol location="com.zfoo.net.packet.common.Error"/>
+        <protocol location="com.zfoo.net.packet.common.Heartbeat"/>
+        <protocol location="com.zfoo.net.packet.common.Ping"/>
+        <protocol location="com.zfoo.net.packet.common.Pong"/>
+    </module>
+
+    <module id="3" name="admin">
+        <protocol location="com.oaixdog.adminbackground.protocol.LoginRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.LoginResponse"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.AccountCreateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.AccountListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.AccountUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.LogoutRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.AccountStatusRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.AccountRoleUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.ProfileGetRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.ProfileUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.ProfilePasswordRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.SystemSettingGetRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.SystemSettingUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.AccountRoleOptionsRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.MenuListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.MenuCreateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.MenuUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.MenuRemoveRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.AccessMenuRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.RoleListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.RoleCreateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.RoleUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.RoleRemoveRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.RoleMenuListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.RoleMenuUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OperationLogListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.BackupGetRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.BackupUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.BackupRunRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.BackupDownloadRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.BackupRemoveRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataSourceListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataSourceCreateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataSourceUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataSourceRemoveRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataSourceTestRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataSourceQueriesRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataTemplateListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataTemplateCreateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataTemplateUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataTemplateRemoveRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataQueryRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.DataQueryExportRequest"/>
+    </module>
+
+</protocols>

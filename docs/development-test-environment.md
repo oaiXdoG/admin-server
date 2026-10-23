@@ -20,7 +20,7 @@ Redis 和 PostgreSQL 运行在 SSH 别名为 `us` 的远程服务器 Docker 中�
 | Redis | `49.51.199.110:16379` |
 | PostgreSQL | `49.51.199.110:15432` |
 
-数据库名称和用户名为 `deep_sea_war`。完整连接参数和测试密码保存在项目的 `conf/application.properties` 中。
+数据库名称和用户名为 `deep_sea_war`。完整连接参数和测试密码保存在 `admin-server/conf/application.properties` 中。
 
 ## 远程容器管理
 
