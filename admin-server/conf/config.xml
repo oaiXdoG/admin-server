@@ -18,7 +18,17 @@
 
     <context:component-scan base-package="com.oaixdog.adminbackground"/>
 
-    <net:net id="deepSeaWar" protocol-location="protocol.xml"/>
+    <net:net id="admin" protocol-location="protocol.xml">
+        <net:registry center="zookeeper" path="${zookeeper.path}" user="" password="">
+            <net:address name="zookeeper" url="${zookeeper.address}"/>
+        </net:registry>
+        <net:providers>
+            <net:provider protocol-module="admin" provider="admin"/>
+        </net:providers>
+        <net:consumers>
+            <net:consumer consumer="log"/>
+        </net:consumers>
+    </net:net>
 
     <scheduler:scheduler id="deepSeaWar"/>
 </beans>

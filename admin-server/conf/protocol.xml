@@ -12,7 +12,18 @@
         <protocol location="com.zfoo.net.packet.common.Pong"/>
     </module>
 
+    <!-- 服务之间的 RPC：admin 模块，见 protocol 工程 AGENTS.md -->
     <module id="3" name="admin">
+        <protocol location="com.oaixdog.protocol.admin"/>
+    </module>
+
+    <!-- 服务之间的 RPC：log 模块，admin 作为 consumer 调用 -->
+    <module id="4" name="log">
+        <protocol location="com.oaixdog.protocol.log"/>
+    </module>
+
+    <!-- 管理后台前后端 HTTP 接口，内部模块（23～127） -->
+    <module id="23" name="web">
         <protocol location="com.oaixdog.adminbackground.protocol.LoginRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.LoginResponse"/>
         <protocol location="com.oaixdog.adminbackground.protocol.AccountCreateRequest"/>
