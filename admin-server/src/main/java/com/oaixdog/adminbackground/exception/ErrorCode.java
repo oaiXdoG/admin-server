@@ -104,7 +104,18 @@ public enum ErrorCode {
     DATA_TEMPLATE_NOT_FOUND(100058, "查询模板不存在"),
     DATA_TEMPLATE_NAME_EXISTS(100059, "查询模板名称已存在"),
     DATA_TEMPLATE_INVALID(100060, "查询模板配置不合法"),
-    DATA_QUERY_PARAM_INVALID(100061, "查询参数不合法");
+    DATA_QUERY_PARAM_INVALID(100061, "查询参数不合法"),
+
+    /**
+     * 判断的是没有在线的日志服务（没有收到服务类型 log 的上报，或上报的连接已断开）。
+     * 读取、保存日志事件和日志查询时检查。
+     */
+    LOG_SERVICE_UNAVAILABLE(100062, "当前没有可用的服务"),
+    LOG_EVENT_NOT_FOUND(100063, "日志事件不存在"),
+    LOG_EVENT_EXISTS(100064, "事件已存在"),
+    LOG_EVENT_INVALID(100065, "日志事件配置不合法"),
+    LOG_QUERY_CONDITION_INVALID(100066, "日志查询条件不合法"),
+    LOG_QUERY_FAILED(100067, "日志查询失败");
 
     private final int code;
     private final String message;

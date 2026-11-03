@@ -67,6 +67,10 @@
         <protocol location="com.oaixdog.adminbackground.protocol.DataTemplateRemoveRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.DataQueryRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.DataQueryExportRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.LogEventListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.LogEventCreateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.LogEventUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.LogQueryRequest"/>
     </module>
 
 </protocols>

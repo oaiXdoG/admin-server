@@ -69,7 +69,9 @@ public class OperationLogService {
             Map.entry("/data/template/create", "新建数据查询模板"),
             Map.entry("/data/template/update", "修改数据查询模板"),
             Map.entry("/data/template/remove", "删除数据查询模板"),
-            Map.entry("/data/query/export", "导出数据查询结果"));
+            Map.entry("/data/query/export", "导出数据查询结果"),
+            Map.entry("/log/event/create", "新建日志事件"),
+            Map.entry("/log/event/update", "修改日志事件"));
 
     private final LoginService loginService;
     private final AccountMapper accountMapper;
