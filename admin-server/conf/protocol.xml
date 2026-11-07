@@ -71,6 +71,30 @@
         <protocol location="com.oaixdog.adminbackground.protocol.LogEventCreateRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.LogEventUpdateRequest"/>
         <protocol location="com.oaixdog.adminbackground.protocol.LogQueryRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsHostListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsHostOptionsRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsHostUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsHostRemoveRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppCreateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppUpdateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppRemoveRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppControlRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppLogRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppConfigListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppConfigGetRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppConfigSaveRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppUploadStartRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppUploadChunkRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppDeployRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppOptionsRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsHostCreateRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsHostTestRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsHostInitRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppBackupsRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsAppRollbackRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsTaskListRequest"/>
+        <protocol location="com.oaixdog.adminbackground.protocol.OpsTaskGetRequest"/>
     </module>
 
 </protocols>

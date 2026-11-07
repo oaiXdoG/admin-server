@@ -62,4 +62,34 @@ public class ApplicationProperties {
     /** pg_dump 可执行文件，不在 PATH 里时写完整路径 */
     @Value("${backup.pg-dump:pg_dump}")
     private String backupPgDump;
+
+    /** 运维中心：Ansible playbook 目录（相对于工作目录，即程序目录下的 ansible/） */
+    @Value("${ops.ansible.dir:ansible}")
+    private String opsAnsibleDir;
+
+    /** 运维中心：登录服务器的账号和私钥，所有主机共用 */
+    @Value("${ops.ssh.user:root}")
+    private String opsSshUser;
+
+    @Value("${ops.ssh.key:/root/.ssh/id_ed25519}")
+    private String opsSshKey;
+
+    /** 运维中心：上传的程序包暂存目录 */
+    @Value("${ops.upload.dir:ops-upload}")
+    private String opsUploadDir;
+
+    /** 运维中心：发布时程序目录 backup/ 下保留的旧版本数 */
+    @Value("${ops.backup.keep:3}")
+    private int opsBackupKeep;
+
+    /** 运维中心：写给 Prometheus 的主机列表目录（file_sd，node.json、process.json），为空时不写 */
+    @Value("${ops.prometheus.targets-dir:}")
+    private String opsPrometheusTargetsDir;
+
+    /** 运维中心：业务服务器上 node_exporter、process-exporter 的监听端口；「初始化」按它配置，主机列表按它写给 Prometheus */
+    @Value("${ops.exporter.node-port:9100}")
+    private int opsNodeExporterPort;
+
+    @Value("${ops.exporter.process-port:9256}")
+    private int opsProcessExporterPort;
 }

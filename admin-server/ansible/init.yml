@@ -1,0 +1,72 @@
+# 初始化主机，可以重复执行：
+# - 程序运行需要的 JDK 21、unzip（bin/start.sh 用它读取 Main-Class）
+# - 监控：node_exporter（机器指标、danmu-* 服务的状态）、process-exporter（每个程序进程的 CPU、内存、线程）
+#   由管理后台所在机器上的 Prometheus 拉取，两个端口只需要对它开放
+# vars：node_exporter_port、process_exporter_port（管理后台的 ops.exporter.node-port、ops.exporter.process-port 传入）
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: 安装 openjdk-21-jre-headless、unzip、node_exporter、process-exporter
+      ansible.builtin.apt:
+        name: [openjdk-21-jre-headless, unzip, dbus, prometheus-node-exporter, prometheus-process-exporter]
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 3600
+
+    # systemd 收集器只报告 danmu-* 服务（程序是否在运行、是否失败）
+    - name: 配置 node_exporter
+      ansible.builtin.copy:
+        dest: /etc/default/prometheus-node-exporter
+        content: |
+          # 由管理后台运维中心生成
+          ARGS="--web.listen-address=:{{ node_exporter_port | default(9100) }} --collector.systemd --collector.systemd.unit-include=danmu-.+"
+      register: node_exporter_conf
+
+    # prometheus-process-exporter 包不一定会建这个目录（Ubuntu 24.04 上不会），先建好
+    - name: 配置目录 /etc/prometheus
+      ansible.builtin.file:
+        path: /etc/prometheus
+        state: directory
+        mode: "0755"
+
+    # 按命令行里的 -Dhost.app.dir=<程序目录>（bin/start.sh 启动时带上）把进程归到程序，groupname 为程序目录
+    - name: 配置 process-exporter 的进程分组
+      ansible.builtin.copy:
+        dest: /etc/prometheus/process-exporter.yml
+        content: |
+          # 由管理后台运维中心生成
+          process_names:
+            - name: "{{ '{{' }}.Matches.dir{{ '}}' }}"
+              cmdline:
+                - '-Dhost\.app\.dir=(?P<dir>\S+)'
+      register: process_exporter_yml
+
+    - name: 配置 process-exporter
+      ansible.builtin.copy:
+        dest: /etc/default/prometheus-process-exporter
+        content: |
+          # 由管理后台运维中心生成
+          ARGS="-web.listen-address :{{ process_exporter_port | default(9256) }} -config.path /etc/prometheus/process-exporter.yml"
+      register: process_exporter_conf
+
+    - name: 启动 node_exporter
+      ansible.builtin.systemd_service:
+        name: prometheus-node-exporter
+        enabled: true
+        state: "{{ 'restarted' if node_exporter_conf.changed else 'started' }}"
+
+    - name: 启动 process-exporter
+      ansible.builtin.systemd_service:
+        name: prometheus-process-exporter
+        enabled: true
+        state: "{{ 'restarted' if (process_exporter_yml.changed or process_exporter_conf.changed) else 'started' }}"
+
+    - name: 确认 java、unzip 可用
+      ansible.builtin.shell: "java -version 2>&1 | head -1 && unzip -v | head -1"
+      register: versions
+      changed_when: false
+
+    - name: 版本
+      ansible.builtin.debug:
+        msg: "{{ versions.stdout_lines }}"

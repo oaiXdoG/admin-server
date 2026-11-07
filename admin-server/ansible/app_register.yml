@@ -1,0 +1,18 @@
+# 登记程序：生成 systemd 服务 danmu-<app_name>（目录变了重新生成）。vars：app_name、app_dir、old_app_name（改名时的旧名称，可空）
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: 停用旧名称的服务
+      ansible.builtin.shell: |
+        if [ -f /etc/systemd/system/danmu-{{ old_app_name }}.service ]; then
+          systemctl disable --now danmu-{{ old_app_name }} || true
+          rm -f /etc/systemd/system/danmu-{{ old_app_name }}.service
+          systemctl daemon-reload
+          echo removed
+        fi
+      register: old_unit
+      changed_when: "'removed' in old_unit.stdout"
+      when: old_app_name | default('') not in ['', app_name]
+
+    - name: 生成服务
+      ansible.builtin.import_tasks: tasks/unit.yml

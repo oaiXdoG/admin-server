@@ -16,6 +16,8 @@
         <mybatis-plus.version>3.5.12</mybatis-plus.version>
         <mybatis-spring.version>3.0.4</mybatis-spring.version>
         <lombok.version>1.18.38</lombok.version>
+        <!-- 打包产物目录，bin、conf、lib 放在一起 -->
+        <dist.directory>${project.build.directory}/${project.artifactId}</dist.directory>
     </properties>
 
     <dependencyManagement>
@@ -80,6 +82,15 @@
         </dependency>
     </dependencies>
 
+    <!--
+        mvn package 后 target/admin-server 下的产物（与 host、log 相同的统一格式）：
+        bin/                 统一的启停脚本，源文件在 danmu 根目录的 ops/bin；后台在服务器上手动执行 bin/start.sh、bin/stop.sh 启停
+        conf/                配置文件（含 jvm.options）
+        db/                  schema.sql 和 migration/ 升级脚本（部署时执行）
+        ansible/             运维中心的 Ansible playbook（管理后台所在机器需要安装 ansible-core）
+        lib/admin-server.jar 程序 jar，MANIFEST 带 Main-Class
+        lib/extra/           依赖 jar
+    -->
     <build>
         <finalName>admin-server</finalName>
         <plugins>
@@ -87,6 +98,109 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.14.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <outputDirectory>${dist.directory}/lib</outputDirectory>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.oaixdog.adminbackground.Application</mainClass>
+                            <addClasspath>true</addClasspath>
+                            <classpathPrefix>extra/</classpathPrefix>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.8.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${dist.directory}/lib/extra</outputDirectory>
+                            <includeScope>runtime</includeScope>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-conf</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${dist.directory}/conf</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>conf</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- 数据库：新库执行 schema.sql，已有的库执行 migration/ 下的脚本（脚本都可以重复执行） -->
+                        <id>copy-db</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${dist.directory}/db</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>src/main/resources/db</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- 运维中心的 Ansible playbook -->
+                        <id>copy-ansible</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${dist.directory}/ansible</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>ansible</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- 统一的启停脚本，源文件在 danmu 根目录的 ops/bin -->
+                        <id>copy-bin</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${dist.directory}/bin</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/../../../ops/bin</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

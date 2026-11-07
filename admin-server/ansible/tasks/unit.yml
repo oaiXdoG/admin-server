@@ -1,0 +1,36 @@
+# 写入程序的 systemd 服务 danmu-<app_name>，并设为开机自启
+# 启动走程序自带的统一脚本 bin/start.sh --foreground（JVM 参数在 conf/jvm.options）
+# 控制台输出：stdout 丢弃，stderr 进 journal（journalctl -u danmu-<app_name> 查看 JVM 起不来的原因）
+# SuccessExitStatus=143：java 收到 SIGTERM 正常退出的退出码，不算失败
+- name: 写入 /etc/systemd/system/danmu-{{ app_name }}.service
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/danmu-{{ app_name }}.service"
+    mode: "0644"
+    content: |
+      # 由管理后台运维中心生成，不要手动修改
+      [Unit]
+      Description=danmu {{ app_name }}
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      WorkingDirectory={{ app_dir }}
+      ExecStart=/bin/bash {{ app_dir }}/bin/start.sh --foreground
+      Restart=on-failure
+      RestartSec=5
+      TimeoutStopSec=30
+      SuccessExitStatus=143
+      StandardOutput=null
+      StandardError=journal
+      LimitNOFILE=65535
+
+      [Install]
+      WantedBy=multi-user.target
+  register: unit_file
+
+- name: 重新加载 systemd，设为开机自启
+  ansible.builtin.systemd_service:
+    name: "danmu-{{ app_name }}"
+    daemon_reload: "{{ unit_file.changed }}"
+    enabled: true

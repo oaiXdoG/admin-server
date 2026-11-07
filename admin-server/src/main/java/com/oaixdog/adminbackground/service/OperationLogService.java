@@ -71,7 +71,18 @@ public class OperationLogService {
             Map.entry("/data/template/remove", "删除数据查询模板"),
             Map.entry("/data/query/export", "导出数据查询结果"),
             Map.entry("/log/event/create", "新建日志事件"),
-            Map.entry("/log/event/update", "修改日志事件"));
+            Map.entry("/log/event/update", "修改日志事件"),
+            Map.entry("/ops/host/create", "添加主机"),
+            Map.entry("/ops/host/update", "修改主机"),
+            Map.entry("/ops/host/init", "初始化主机"),
+            Map.entry("/ops/host/remove", "删除主机"),
+            Map.entry("/ops/app/create", "新建程序"),
+            Map.entry("/ops/app/update", "修改程序"),
+            Map.entry("/ops/app/remove", "删除程序"),
+            Map.entry("/ops/app/control", "启停程序"),
+            Map.entry("/ops/app/config/save", "修改程序配置文件"),
+            Map.entry("/ops/app/deploy", "发布程序"),
+            Map.entry("/ops/app/rollback", "回滚程序"));
 
     private final LoginService loginService;
     private final AccountMapper accountMapper;

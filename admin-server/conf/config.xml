@@ -3,6 +3,7 @@
        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
        xmlns:context="http://www.springframework.org/schema/context"
        xmlns:net="http://www.zfoo.com/schema/net"
+       xmlns:event="http://www.zfoo.com/schema/event"
        xmlns:scheduler="http://www.zfoo.com/schema/scheduler"
        xsi:schemaLocation="
              http://www.springframework.org/schema/beans
@@ -11,6 +12,8 @@
              http://www.springframework.org/schema/context/spring-context.xsd
              http://www.zfoo.com/schema/net
              http://www.zfoo.com/schema/net-1.0.xsd
+             http://www.zfoo.com/schema/event
+             http://www.zfoo.com/schema/event-1.0.xsd
              http://www.zfoo.com/schema/scheduler
              http://www.zfoo.com/schema/scheduler-1.0.xsd">
 
@@ -30,5 +33,8 @@
         </net:consumers>
     </net:net>
 
-    <scheduler:scheduler id="deepSeaWar"/>
+    <!-- 注册 @EventReceiver：ServerRegistryService 在连接断开时移除上报 -->
+    <event:event id="eventBus"/>
+
+    <scheduler:scheduler id="daoshinvgui"/>
 </beans>

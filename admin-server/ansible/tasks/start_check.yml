@@ -1,0 +1,26 @@
+# 启动后观察几秒：仍是 active 且没有被 systemd 重启过才算成功；失败时输出 journal 的最后几行
+- name: 记录启动前的重启次数
+  ansible.builtin.command: "systemctl show danmu-{{ app_name }} -p NRestarts --value"
+  register: restarts_before
+  changed_when: false
+
+- name: 等待 5 秒确认程序没有退出
+  ansible.builtin.pause:
+    seconds: 5
+
+- name: 检查状态
+  ansible.builtin.shell: |
+    echo "$(systemctl is-active danmu-{{ app_name }}) $(systemctl show danmu-{{ app_name }} -p NRestarts --value)"
+  register: check_state
+  changed_when: false
+
+- name: 读取 journal
+  ansible.builtin.command: "journalctl -u danmu-{{ app_name }} -n 30 --no-pager -o cat"
+  register: journal
+  changed_when: false
+  when: check_state.stdout != "active " ~ restarts_before.stdout
+
+- name: 启动失败
+  ansible.builtin.fail:
+    msg: "程序没有正常运行（状态 {{ check_state.stdout }}），journal 最后 30 行：\n{{ journal.stdout }}"
+  when: check_state.stdout != "active " ~ restarts_before.stdout

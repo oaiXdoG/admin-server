@@ -115,7 +115,21 @@ public enum ErrorCode {
     LOG_EVENT_EXISTS(100064, "事件已存在"),
     LOG_EVENT_INVALID(100065, "日志事件配置不合法"),
     LOG_QUERY_CONDITION_INVALID(100066, "日志查询条件不合法"),
-    LOG_QUERY_FAILED(100067, "日志查询失败");
+    LOG_QUERY_FAILED(100067, "日志查询失败"),
+    OPS_HOST_NOT_FOUND(100068, "主机不存在"),
+
+    OPS_HOST_IN_USE(100071, "主机还有程序绑定，不能删除"),
+    OPS_APP_NOT_FOUND(100072, "程序不存在"),
+    OPS_APP_DIR_EXISTS(100073, "这台主机上已有程序使用该目录"),
+    OPS_APP_INVALID(100074, "程序配置不合法"),
+    OPS_APP_RUNNING(100075, "程序正在运行，请先停止"),
+    OPS_ANSIBLE_FAILED(100076, "执行 Ansible 失败"),
+    OPS_HOST_EXISTS(100077, "该 IP 的主机已存在"),
+    OPS_HOST_INVALID(100078, "主机配置不合法"),
+    OPS_APP_NAME_EXISTS(100079, "这台主机上已有同名程序"),
+    OPS_TASK_BUSY(100080, "有任务正在执行，请等它结束"),
+    OPS_TASK_NOT_FOUND(100081, "任务不存在"),
+    OPS_UPLOAD_NOT_FOUND(100082, "上传不存在或已过期，请重新上传");
 
     private final int code;
     private final String message;

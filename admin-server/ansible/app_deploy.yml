@@ -1,0 +1,94 @@
+# 发布。vars：app_name、app_dir、package（管理后台本机上的 zip）、overwrite_conf、backup_keep
+# zip 为 mvn package 的产物目录（bin、conf、lib、excel），外面可以再包一层目录
+# 旧的 bin、lib、excel（以及要替换的 conf）移入 backup/<时间>，只保留 backup_keep 份；原来在运行的发布后重新启动
+- hosts: all
+  gather_facts: false
+  tasks:
+    - name: 创建临时目录
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: danmu-deploy-
+      register: tmp
+
+    - block:
+        - name: 上传程序包
+          ansible.builtin.copy:
+            src: "{{ package }}"
+            dest: "{{ tmp.path }}/package.zip"
+
+        - name: 解压
+          ansible.builtin.unarchive:
+            src: "{{ tmp.path }}/package.zip"
+            dest: "{{ tmp.path }}"
+            remote_src: true
+
+        - name: 找到包含 lib 的目录并校验
+          ansible.builtin.shell: |
+            cd "{{ tmp.path }}"
+            if [ -d lib ]; then root="$PWD"
+            else
+              dirs=$(find . -mindepth 1 -maxdepth 1 -type d)
+              if [ "$(echo "$dirs" | wc -l)" = 1 ] && [ -d "$dirs/lib" ]; then root="$PWD/${dirs#./}"; fi
+            fi
+            if [ -z "${root:-}" ]; then echo "程序包里没有 lib 目录，应为 mvn package 产物（bin、conf、lib、excel）的 zip" >&2; exit 1; fi
+            if [ ! -f "$root/bin/start.sh" ]; then echo "程序包里没有 bin/start.sh" >&2; exit 1; fi
+            echo "$root"
+          register: package_root
+          changed_when: false
+
+        - name: 确认服务存在
+          ansible.builtin.import_tasks: tasks/unit.yml
+
+        - name: 接管旧进程
+          ansible.builtin.import_tasks: tasks/adopt.yml
+
+        - name: 记录发布前是否在运行
+          ansible.builtin.command: "systemctl is-active danmu-{{ app_name }}"
+          register: was_active
+          changed_when: false
+          failed_when: false
+
+        - name: 停止
+          ansible.builtin.systemd_service:
+            name: "danmu-{{ app_name }}"
+            state: stopped
+          when: was_active.stdout == "active"
+
+        - name: 备份旧版本并替换
+          ansible.builtin.shell: |
+            set -e
+            src="{{ package_root.stdout }}"
+            dir="{{ app_dir }}"
+            mkdir -p "$dir"
+            names="bin lib excel"
+            if [ -d "$src/conf" ] && { [ "{{ overwrite_conf | bool }}" = True ] || [ ! -d "$dir/conf" ]; }; then names="$names conf"; fi
+            backup="$dir/backup/$(date +%Y%m%d-%H%M%S)"
+            for name in $names; do
+              if [ -e "$dir/$name" ]; then mkdir -p "$backup"; mv "$dir/$name" "$backup/$name"; fi
+              if [ -e "$src/$name" ]; then mv "$src/$name" "$dir/$name"; fi
+            done
+            chmod +x "$dir"/bin/*.sh
+            if [ -d "$dir/backup" ]; then
+              ls -1 "$dir/backup" | sort -r | tail -n +$(({{ backup_keep }} + 1)) | while read -r old; do rm -rf "$dir/backup/$old"; done
+            fi
+            echo "替换了：$names"
+          register: replaced
+
+        - name: 替换结果
+          ansible.builtin.debug:
+            msg: "{{ replaced.stdout }}"
+
+        - name: 重新启动
+          ansible.builtin.systemd_service:
+            name: "danmu-{{ app_name }}"
+            state: started
+          when: was_active.stdout == "active"
+
+        - name: 检查启动结果
+          ansible.builtin.include_tasks: tasks/start_check.yml
+          when: was_active.stdout == "active"
+      always:
+        - name: 删除临时目录
+          ansible.builtin.file:
+            path: "{{ tmp.path }}"
+            state: absent
