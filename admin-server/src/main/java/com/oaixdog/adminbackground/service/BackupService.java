@@ -63,7 +63,7 @@ public class BackupService {
     private static final long DOWNLOAD_MAX_BYTES = 50L * 1024 * 1024;
     private static final long TIMEOUT_MINUTES = 30;
     private static final int MESSAGE_MAX_LENGTH = 500;
-    private static final Pattern FILE_NAME = Pattern.compile("^admin_background-\\d{8}-\\d{6}\\.dump$");
+    private static final Pattern FILE_NAME = Pattern.compile("^daoshinvgui_admin-\\d{8}-\\d{6}\\.dump$");
     private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
     private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -162,7 +162,7 @@ public class BackupService {
     private void backup() {
         long startedAt = System.currentTimeMillis();
         Path dir = Path.of(properties.getBackupDir());
-        String name = "admin_background-" + LocalDateTime.now().format(FILE_TIME) + ".dump";
+        String name = "daoshinvgui_admin-" + LocalDateTime.now().format(FILE_TIME) + ".dump";
         Path part = dir.resolve(name + ".part");
         Path output = dir.resolve(name + ".log");
         try {
