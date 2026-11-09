@@ -44,7 +44,7 @@ import static com.oaixdog.adminbackground.service.AnsibleRunner.quote;
  * 程序：保存在 ops_app，每条绑定一台主机和它上面的一个目录（自己配置）。名称同时是 systemd 服务名 danmu-&lt;名称&gt;。
  * <p>
  * 服务器上由 systemd 运行程序：服务执行程序目录里的 bin/start.sh --foreground（JVM 参数在 conf/jvm.options），挂了自动拉起、开机自启。
- * 服务文件在第一次启动或发布时由 Ansible 生成。启停、发布、回滚、保存配置是运维任务（{@link OpsTaskService}），立即返回任务 id；
+ * 服务文件在第一次启动或发布时由 Ansible 生成。启停、发布、回滚、保存配置在后台执行（{@link OpsTaskService}），立即返回任务 id；
  * 状态、日志、配置文件的读取直接通过 SSH 执行。
  * <p>
  * 查看列表、日志需要 ops_app；新建、编辑、删除需要 ops_app:manage；启停 ops_app:control；发布、回滚 ops_app:deploy；

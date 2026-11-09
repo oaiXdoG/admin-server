@@ -40,6 +40,16 @@ public class OperationLogService {
     private static final int PARAMS_MAX_LENGTH = 8_000;
     /** 图片只记是否修改，不保存内容 */
     private static final Set<String> IMAGE_FIELDS = Set.of("logo", "favicon", "avatar");
+    /**
+     * 这些接口立刻返回，Ansible 还在后台跑。请求成功时不记日志，等任务结束再记真实结果。
+     * 请求当时就失败（参数不合法、已有操作在执行）仍在当时记录。
+     */
+    private static final Set<String> DEFERRED = Set.of(
+            "/ops/host/init",
+            "/ops/app/control",
+            "/ops/app/config/save",
+            "/ops/app/deploy",
+            "/ops/app/rollback");
 
     /** 记录的接口和操作名称，其余接口（查询类）不记录 */
     private static final Map<String, String> ACTIONS = Map.ofEntries(
@@ -119,20 +129,38 @@ public class OperationLogService {
                 Account matched = code == 0 ? accountMapper.selectOne(Wrappers.<Account>lambdaQuery().eq(Account::getAccount, account)) : null;
                 accountId = matched == null ? null : matched.getId();
             }
-            String params = JsonUtils.object2String(params(request));
-            OperationLog entry = new OperationLog();
-            entry.setAccountId(accountId);
-            entry.setAccount(account.length() > 64 ? account.substring(0, 64) : account);
-            entry.setRoute(operation.route());
-            entry.setAction(operation.action());
-            entry.setSuccess(code == 0);
-            entry.setCode(code);
-            entry.setParams(params.length() > PARAMS_MAX_LENGTH ? params.substring(0, PARAMS_MAX_LENGTH) : params);
-            entry.setCreatedAt(System.currentTimeMillis());
-            operationLogMapper.insert(entry);
+            if (code == 0 && DEFERRED.contains(operation.route())) {
+                return;
+            }
+            write(accountId, account, operation.route(), operation.action(), params(request), code == 0, code);
         } catch (RuntimeException exception) {
             log.warn("记录操作日志失败: {}", exception.getMessage());
         }
+    }
+
+    /** 后台操作结束时写入。成功与否是 Ansible 的结果，不是接口有没有接住这次请求 */
+    public void record(Long accountId, String account, String route, String action, Map<String, Object> params,
+                       boolean success, int code) {
+        try {
+            write(accountId, account == null ? "" : account, route, action, params == null ? Map.of() : params, success, code);
+        } catch (RuntimeException exception) {
+            log.warn("记录操作日志失败: {}", exception.getMessage());
+        }
+    }
+
+    private void write(Long accountId, String account, String route, String action, Map<String, Object> params,
+                       boolean success, int code) {
+        String paramsText = JsonUtils.object2String(params);
+        OperationLog entry = new OperationLog();
+        entry.setAccountId(accountId);
+        entry.setAccount(account.length() > 64 ? account.substring(0, 64) : account);
+        entry.setRoute(route);
+        entry.setAction(action.length() > 64 ? action.substring(0, 64) : action);
+        entry.setSuccess(success);
+        entry.setCode(code);
+        entry.setParams(paramsText.length() > PARAMS_MAX_LENGTH ? paramsText.substring(0, PARAMS_MAX_LENGTH) : paramsText);
+        entry.setCreatedAt(System.currentTimeMillis());
+        operationLogMapper.insert(entry);
     }
 
     /** 名称含 password 或 secret 的字段记为 ******，图片字段记为 (图片)，文件内容记为 (文件内容) */

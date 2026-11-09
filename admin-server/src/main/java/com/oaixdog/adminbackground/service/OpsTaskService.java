@@ -13,6 +13,7 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.stereotype.Service;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,11 +23,12 @@ import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 /**
- * 运维任务：初始化主机、启停、发布、回滚、保存配置都在后台线程里执行 Ansible，请求立即返回任务 id。
- * 执行中的输出在内存里，页面按 offset 增量读取；结束后输出和结果写入 ops_task。
- * 同一个程序（或主机初始化）同一时间只能有一个任务。管理后台重启时，还在执行中的任务记为失败。
+ * 初始化主机、启停、发布、回滚、保存配置都在后台线程里执行 Ansible，请求立即返回任务 id。
+ * 执行中的输出在内存里，发起操作的页面按 offset 增量读取；结束后输出写入 ops_task。
+ * 谁做了什么、成功还是失败，在任务结束时写入操作日志。同一个程序（或主机初始化）同一时间只能有一个任务。
+ * 管理后台重启时，还在执行中的任务记为失败。
  * <p>
- * 查看任务需要 ops_task、ops_app、ops_host 任一（程序、主机页面里也要看任务输出）。
+ * 查看输出需要 ops_app 或 ops_host（程序页、主机页里看这次操作的输出）。
  */
 @Service
 @RequiredArgsConstructor
@@ -34,14 +36,13 @@ public class OpsTaskService implements InitializingBean {
 
     private static final Logger log = LoggerFactory.getLogger(OpsTaskService.class);
 
-    private static final String MENU = "ops_task";
     private static final String APP_MENU = "ops_app";
     private static final String HOST_MENU = "ops_host";
     /** 输出最多保留这么多字符，超过时丢掉前面的 */
     private static final int OUTPUT_MAX_CHARS = 200_000;
-    private static final int PAGE_SIZE_MAX = 100;
 
     private final PermissionService permissionService;
+    private final OperationLogService operationLogService;
     private final OpsTaskMapper opsTaskMapper;
 
     private final ExecutorService executor = Executors.newThreadPerTaskExecutor(
@@ -84,13 +85,18 @@ public class OpsTaskService implements InitializingBean {
 
     @Override
     public void afterPropertiesSet() {
-        var interrupted = new OpsTask();
-        interrupted.setStatus(OpsTask.FAILED);
-        interrupted.setFinishedAt(System.currentTimeMillis());
-        int count = opsTaskMapper.update(interrupted, Wrappers.<OpsTask>lambdaUpdate().eq(OpsTask::getStatus, OpsTask.RUNNING));
-        if (count > 0) {
-            log.warn("管理后台重启前有 {} 个运维任务没有执行完，已记为失败", count);
+        List<OpsTask> interrupted = opsTaskMapper.selectList(Wrappers.<OpsTask>lambdaQuery().eq(OpsTask::getStatus, OpsTask.RUNNING));
+        if (interrupted.isEmpty()) {
+            return;
         }
+        var failed = new OpsTask();
+        failed.setStatus(OpsTask.FAILED);
+        failed.setFinishedAt(System.currentTimeMillis());
+        opsTaskMapper.update(failed, Wrappers.<OpsTask>lambdaUpdate().eq(OpsTask::getStatus, OpsTask.RUNNING));
+        for (OpsTask task : interrupted) {
+            record(null, task.getAccount(), task.getType(), task.getTitle(), task.getHostId(), task.getAppId(), false);
+        }
+        log.warn("管理后台重启前有 {} 个操作没有执行完，已记为失败", interrupted.size());
     }
 
     /**
@@ -139,15 +145,54 @@ public class OpsTaskService implements InitializingBean {
                 opsTaskMapper.updateById(finished);
                 running.remove(id);
                 busy.remove(lock);
-                log.info("运维任务结束，id={}，{}，结果={}", id, title, finished.getStatus());
+                record(account, account == null ? "" : account.getAccount(), type, title, hostId, appId, success);
+                log.info("操作结束，id={}，{}，结果={}", id, title, finished.getStatus());
             }
         });
         return id;
     }
 
+    /** 操作日志里的结果。title 放进参数，操作列用固定名称，方便按「发布」「回滚」筛选 */
+    private void record(Account account, String accountName, String type, String title, long hostId, long appId, boolean success) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("title", title);
+        if (hostId > 0) {
+            params.put("hostId", hostId);
+        }
+        if (appId > 0) {
+            params.put("appId", appId);
+        }
+        operationLogService.record(account == null ? null : account.getId(), accountName, routeOf(type), actionOf(type), params,
+                success, success ? 0 : ErrorCode.OPS_ANSIBLE_FAILED.getCode());
+    }
+
+    private static String routeOf(String type) {
+        return switch (type) {
+            case "init" -> "/ops/host/init";
+            case "config" -> "/ops/app/config/save";
+            case "deploy" -> "/ops/app/deploy";
+            case "rollback" -> "/ops/app/rollback";
+            case "start", "stop", "restart" -> "/ops/app/control";
+            default -> "/ops/app/control";
+        };
+    }
+
+    private static String actionOf(String type) {
+        return switch (type) {
+            case "init" -> "初始化主机";
+            case "start" -> "启动程序";
+            case "stop" -> "停止程序";
+            case "restart" -> "重启程序";
+            case "deploy" -> "发布程序";
+            case "rollback" -> "回滚程序";
+            case "config" -> "修改程序配置文件";
+            default -> "运维操作";
+        };
+    }
+
     /** 任务详情；output 为 offset 之后的输出，下次用返回的 offset 继续读 */
     public Map<String, Object> get(String authorization, Long taskId, Integer offset) {
-        permissionService.requireAnyMenu(authorization, MENU, APP_MENU, HOST_MENU);
+        permissionService.requireAnyMenu(authorization, APP_MENU, HOST_MENU);
         OpsTask task = taskId == null ? null : opsTaskMapper.selectById(taskId);
         if (task == null) {
             throw new BusinessException(ErrorCode.OPS_TASK_NOT_FOUND);
@@ -164,25 +209,6 @@ public class OpsTaskService implements InitializingBean {
             result.put("offset", output.length());
         }
         return result;
-    }
-
-    /** 按开始时间倒序分页，不含输出；hostId、appId 为空时不过滤 */
-    public Map<String, Object> list(String authorization, Integer page, Integer pageSize, Long hostId, Long appId) {
-        permissionService.requireAnyMenu(authorization, MENU, APP_MENU, HOST_MENU);
-        int size = pageSize == null || pageSize <= 0 ? 20 : Math.min(pageSize, PAGE_SIZE_MAX);
-        int pageNumber = page == null || page <= 0 ? 1 : Math.min(page, 10_000);
-        long total = opsTaskMapper.selectCount(Wrappers.<OpsTask>lambdaQuery()
-                .eq(hostId != null, OpsTask::getHostId, hostId)
-                .eq(appId != null, OpsTask::getAppId, appId));
-        List<Map<String, Object>> items = opsTaskMapper.selectList(Wrappers.<OpsTask>lambdaQuery()
-                        .select(OpsTask::getId, OpsTask::getType, OpsTask::getTitle, OpsTask::getHostId, OpsTask::getAppId,
-                                OpsTask::getAccount, OpsTask::getStatus, OpsTask::getStartedAt, OpsTask::getFinishedAt)
-                        .eq(hostId != null, OpsTask::getHostId, hostId)
-                        .eq(appId != null, OpsTask::getAppId, appId)
-                        .orderByDesc(OpsTask::getId)
-                        .last("limit " + size + " offset " + (long) (pageNumber - 1) * size))
-                .stream().map(OpsTaskService::summary).toList();
-        return Map.of("items", items, "total", total);
     }
 
     /** 程序或主机当前是否有任务在执行 */

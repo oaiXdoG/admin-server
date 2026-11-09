@@ -58,7 +58,6 @@ import com.oaixdog.adminbackground.protocol.OpsHostTestRequest;
 import com.oaixdog.adminbackground.protocol.OpsHostInitRequest;
 import com.oaixdog.adminbackground.protocol.OpsAppBackupsRequest;
 import com.oaixdog.adminbackground.protocol.OpsAppRollbackRequest;
-import com.oaixdog.adminbackground.protocol.OpsTaskListRequest;
 import com.oaixdog.adminbackground.protocol.OpsTaskGetRequest;
 import com.oaixdog.adminbackground.protocol.ProfileGetRequest;
 import com.oaixdog.adminbackground.protocol.ProfilePasswordRequest;
@@ -160,7 +159,6 @@ public class Application {
                 case "POST /ops/host/init" -> parseRequest(rawRequest, OpsHostInitRequest.class);
                 case "POST /ops/app/backups" -> parseRequest(rawRequest, OpsAppBackupsRequest.class);
                 case "POST /ops/app/rollback" -> parseRequest(rawRequest, OpsAppRollbackRequest.class);
-                case "POST /ops/task/list" -> parseRequest(rawRequest, OpsTaskListRequest.class);
                 case "POST /ops/task/get" -> parseRequest(rawRequest, OpsTaskGetRequest.class);
                 case "POST /system/operation-log/list" -> parseRequest(rawRequest, OperationLogListRequest.class);
                 case "POST /system/backup/get" -> parseRequest(rawRequest, BackupGetRequest.class);

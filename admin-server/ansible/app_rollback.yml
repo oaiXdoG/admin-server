@@ -1,5 +1,6 @@
 # 回滚到 backup/<backup>。vars：app_name、app_dir、backup
-# 当前的 bin、lib、excel（以及备份里有的 conf）先移入 backup/<现在时间>，所以回滚本身也能再回滚；原来在运行的回滚后重新启动
+# 备份里有的 bin、lib、excel、conf 换回去；当前这些目录先移入 backup/<现在时间>，所以回滚本身也能再回滚
+# 原来在运行的回滚后重新启动
 - hosts: all
   gather_facts: false
   tasks:

@@ -7,7 +7,7 @@
   - 名称同时是 systemd 服务名 `danmu-<名称>`，同一台主机上名称、目录都不能重复。
   - 服务在第一次启动或发布时由 Ansible 生成：执行程序目录里的 `bin/start.sh --foreground`（JVM 参数在 `conf/jvm.options`），挂了自动拉起、开机自启；stdout 丢弃，stderr 进 journal。
   - 在服务器上手动启停：`systemctl start|stop|restart danmu-<名称>`；JVM 起不来时看 `journalctl -u danmu-<名称>`。
-- **运维任务**：初始化、启停、发布、回滚、保存配置都是运维任务（`ops_task`），接口立即返回 `taskId`，用 `/ops/task/get` 读取实时输出。同一个程序同一时间只能有一个任务。
+- **后台执行**：初始化、启停、发布、回滚、保存配置都在后台跑 Ansible，接口立即返回 `taskId`，发起操作的页面用 `/ops/task/get` 读实时输出。同一个程序同一时间只能有一个。谁做了什么、成功还是失败，在结束时写入操作日志，没有单独的历史页。
 - **监控**：主机「初始化」时装上 node_exporter、process-exporter，由 Prometheus 拉取；「主机监控」页嵌入 Grafana 的面板（经 nginx 以同源的 `/grafana/` 访问）。管理后台只负责把主机列表写给 Prometheus（`ops.prometheus.targets-dir`）和提供下拉选项。
 
 playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一的 `bin` 脚本在 danmu 根目录的 `ops/bin`，Prometheus、Grafana 的配置和面板在 `ops/monitoring`，见 `ops/README.md`。
@@ -40,10 +40,9 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 | `ops_app:control` | 启动、停止、重启（「保存并重启」也需要） |
 | `ops_app:deploy` | 上传并发布、回滚 |
 | `ops_app:config` | 查看和保存 conf 下的文件（可能含密码，查看也需要这个按钮） |
-| `ops_task` | 运维任务列表 |
 | `ops_monitor` | 主机监控（嵌入的 Grafana 面板本身是匿名只读，不经过这里的权限，见 `ops/README.md`） |
 
-主机下拉选项（`/ops/host/options`）有 `ops_host`、`ops_app`、`ops_monitor` 之一即可；读取单个任务（`/ops/task/get`）有 `ops_task`、`ops_app`、`ops_host` 之一即可。
+主机下拉选项（`/ops/host/options`）有 `ops_host`、`ops_app`、`ops_monitor` 之一即可；读取这次操作的输出（`/ops/task/get`）有 `ops_app` 或 `ops_host` 即可。
 
 ## 主机
 
@@ -119,7 +118,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 `hostId` 为空时返回全部主机上的程序。每台主机通过一次 SSH 读出它上面所有程序的状态。返回 `list`，每项：
 - 配置字段：`id`、`name`、`hostId`、`hostIp`、`hostname`、`dir`、`remark`、`deployedAt`（0 表示没有发布过）、`createdAt`、`updatedAt`
 - `hostOnline`：读取状态成功
-- `busy`：有运维任务正在执行
+- `busy`：这台主机或这个程序上有操作正在执行
 - `error`：连不上或读取失败时的原因
 - `state`：读取成功时返回
 
@@ -197,13 +196,13 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 3. `POST /ops/app/deploy`，`{"appId":1,"uploadId":"...","overwriteConf":false}`，返回 `{taskId}`。执行 `app_deploy.yml`：
    - 上传到服务器的临时目录，解压校验。
    - 生成 systemd 服务，接管旧进程；在运行的先停止。
-   - 旧的 `bin`、`lib`、`excel` 移入 `backup/<时间>`，只保留 `ops.backup.keep` 份。
-   - `conf` 默认保留机器上的；目录里没有 conf，或 `overwriteConf` 为 true 时使用包里的（旧 conf 一起备份）。
+   - 更新前备份机器上的 `conf`、`excel`、`lib`、`bin` 到 `backup/<时间>`，只保留 `ops.backup.keep` 份。要替换的目录移进备份，不替换的 `conf` 复制一份，机器上的原文件留在原地。
+   - `conf` 默认不替换；目录里没有 conf，或 `overwriteConf` 为 true 时使用包里的。
    - 原来在运行的重新启动，并检查启动结果。
 
 回滚：
 - `POST /ops/app/backups`，`{"appId":1}`，返回 `{list}`：`backup/` 下的版本名（`yyyyMMdd-HHmmss`），新的在前。
-- `POST /ops/app/rollback`，`{"appId":1,"backup":"20261106-074714"}`，返回 `{taskId}`。当前的 `bin`、`lib`、`excel`（以及备份里有的 `conf`）先移入 `backup/<现在时间>`，再换回这个版本，所以回滚本身也能再回滚；原来在运行的回滚后重新启动。
+- `POST /ops/app/rollback`，`{"appId":1,"backup":"20261106-074714"}`，返回 `{taskId}`。备份里有的 `bin`、`lib`、`excel`、`conf` 换回去；当前这些目录先移入 `backup/<现在时间>`，所以回滚本身也能再回滚。原来在运行的回滚后重新启动。
 
 ## 主机监控
 
@@ -217,15 +216,9 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 
 曲线不经过管理后台：页面嵌入 Grafana 的面板 `/grafana/d/danmu-host/host?var-host=<IP>`（主机），选中程序时为 `/grafana/d/danmu-app/app?var-host=<IP>&var-app=<程序目录>`。
 
-## 运维任务
+## 执行输出
 
-### `POST /ops/task/list`
-
-```json
-{"page":1,"pageSize":20,"hostId":null,"appId":null}
-```
-
-按开始时间倒序。返回 `{items, total}`，每项：`id`、`type`（`init`、`start`、`stop`、`restart`、`deploy`、`rollback`、`config`）、`title`、`hostId`、`appId`、`account`（操作人）、`status`（`running`、`success`、`failed`）、`startedAt`、`finishedAt`。
+没有历史列表。初始化、启停、发布、回滚、保存配置在结束时写入操作日志（操作名、操作人、成功或失败；参数里有 `title`、`hostId`、`appId`）。请求当时就失败的（参数不合法、已有操作在执行）仍在请求时记录。
 
 ### `POST /ops/task/get`
 
@@ -233,7 +226,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 {"taskId":1,"offset":0}
 ```
 
-返回任务字段，加上 `output`（`offset` 之后的输出）和 `offset`（下次读取用）。页面每秒读取一次直到 `status` 不是 `running`。输出最多保留 20 万字符。管理后台重启时，还在执行中的任务记为失败。
+返回这次操作的字段，加上 `output`（`offset` 之后的输出）和 `offset`（下次读取用）。页面每秒读取一次直到 `status` 不是 `running`。输出最多保留 20 万字符。管理后台重启时，还在执行中的操作记为失败，并写入操作日志。
 
 ## 错误码
 
@@ -260,4 +253,5 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 `schema.sql` 只在首次建库时执行。已有的库执行 `src/main/resources/db/migration/` 下还没执行过的脚本，按文件名顺序：
 
 - `20261103-ops-center.sql`：运维中心的主机、程序表和菜单（运维中心之前建的库）。
-- `20261106-ops-ansible.sql`：主机加 SSH 端口和初始化时间、程序名称唯一、运维任务表和「运维任务」菜单。
+- `20261106-ops-ansible.sql`：主机加 SSH 端口和初始化时间、程序名称唯一、执行记录表和「运维任务」菜单。
+- `20261108-drop-ops-task-menu.sql`：去掉「运维任务」菜单。表 `ops_task` 保留，只给正在执行的操作写输出。

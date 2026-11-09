@@ -25,7 +25,6 @@ import com.oaixdog.adminbackground.protocol.OpsHostTestRequest;
 import com.oaixdog.adminbackground.protocol.OpsHostInitRequest;
 import com.oaixdog.adminbackground.protocol.OpsAppBackupsRequest;
 import com.oaixdog.adminbackground.protocol.OpsAppRollbackRequest;
-import com.oaixdog.adminbackground.protocol.OpsTaskListRequest;
 import com.oaixdog.adminbackground.protocol.OpsTaskGetRequest;
 import com.oaixdog.adminbackground.service.OperationLogService;
 import com.oaixdog.adminbackground.service.OpsAppService;
@@ -43,7 +42,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
-/** 运维中心：主机、程序、运维任务和监控的下拉选项。主机、程序通过 Ansible 管理（启停、发布等返回任务 id）；监控曲线在 Grafana */
+/** 运维中心：主机、程序和监控的下拉选项。主机、程序通过 Ansible 管理（启停、发布等返回任务 id，页面轮询输出）；监控曲线在 Grafana */
 @Component
 @RequiredArgsConstructor
 public class OpsCenterController {
@@ -181,12 +180,6 @@ public class OpsCenterController {
     public void atOpsAppRollbackRequest(Session session, OpsAppRollbackRequest request, HttpAttachment attachment) {
         handle(session, attachment, request, () -> Map.of("taskId", opsAppService.rollback(auth(attachment), request.getAppId(),
                 request.getBackup())));
-    }
-
-    @PacketReceiver
-    public void atOpsTaskListRequest(Session session, OpsTaskListRequest request, HttpAttachment attachment) {
-        handle(session, attachment, request, () -> opsTaskService.list(auth(attachment), request.getPage(), request.getPageSize(),
-                request.getHostId(), request.getAppId()));
     }
 
     @PacketReceiver

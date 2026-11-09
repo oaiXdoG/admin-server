@@ -1,6 +1,7 @@
 # 发布。vars：app_name、app_dir、package（管理后台本机上的 zip）、overwrite_conf、backup_keep
 # zip 为 mvn package 的产物目录（bin、conf、lib、excel），外面可以再包一层目录
-# 旧的 bin、lib、excel（以及要替换的 conf）移入 backup/<时间>，只保留 backup_keep 份；原来在运行的发布后重新启动
+# 更新前把现有的 conf、excel、lib、bin 备份到 backup/<时间>（要替换的移走，不替换的 conf 复制一份），只保留 backup_keep 份
+# conf 默认不替换，目录里还没有或 overwrite_conf 时才用包里的；原来在运行的发布后重新启动
 - hosts: all
   gather_facts: false
   tasks:
@@ -60,18 +61,26 @@
             src="{{ package_root.stdout }}"
             dir="{{ app_dir }}"
             mkdir -p "$dir"
-            names="bin lib excel"
-            if [ -d "$src/conf" ] && { [ "{{ overwrite_conf | bool }}" = True ] || [ ! -d "$dir/conf" ]; }; then names="$names conf"; fi
+            replace="bin lib excel"
+            if [ -d "$src/conf" ] && { [ "{{ overwrite_conf | bool }}" = True ] || [ ! -d "$dir/conf" ]; }; then replace="$replace conf"; fi
             backup="$dir/backup/$(date +%Y%m%d-%H%M%S)"
-            for name in $names; do
-              if [ -e "$dir/$name" ]; then mkdir -p "$backup"; mv "$dir/$name" "$backup/$name"; fi
+            for name in conf excel lib bin; do
+              if [ ! -e "$dir/$name" ]; then continue; fi
+              mkdir -p "$backup"
+              case " $replace " in
+                *" $name "*) mv "$dir/$name" "$backup/$name" ;;
+                *) cp -a "$dir/$name" "$backup/$name" ;;
+              esac
+            done
+            for name in $replace; do
               if [ -e "$src/$name" ]; then mv "$src/$name" "$dir/$name"; fi
             done
             chmod +x "$dir"/bin/*.sh
             if [ -d "$dir/backup" ]; then
               ls -1 "$dir/backup" | sort -r | tail -n +$(({{ backup_keep }} + 1)) | while read -r old; do rm -rf "$dir/backup/$old"; done
             fi
-            echo "替换了：$names"
+            if [ -d "$backup" ]; then echo "备份到 $(basename "$backup")：$(ls -1 "$backup" | tr '\n' ' ')"; else echo "没有需要备份的旧目录"; fi
+            echo "替换了：$replace"
           register: replaced
 
         - name: 替换结果
