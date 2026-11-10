@@ -1,18 +1,41 @@
 # 运维中心
 
-管理服务器和服务器上的程序。管理后台用 **Ansible** 以 root 通过 SSH 操作服务器，程序在服务器上由 **systemd** 运行。
+管理服务器和服务器上的程序。管理后台调用本机的 `ssh` 命令，以 root 登录服务器执行命令。
 
 - **主机**：在后台手动添加（IP、SSH 端口），保存在 `ops_host`。添加后点「初始化」安装程序运行需要的 JDK 21、unzip。
-- **程序**：保存在 `ops_app`，每条绑定一台主机和它上面的一个目录（绝对路径，自己配置）。
-  - 名称同时是 systemd 服务名 `danmu-<名称>`，同一台主机上名称、目录都不能重复。
-  - 服务在第一次启动或发布时由 Ansible 生成：执行程序目录里的 `bin/start.sh --foreground`（JVM 参数在 `conf/jvm.options`），挂了自动拉起、开机自启；stdout 丢弃，stderr 进 journal。
-  - 在服务器上手动启停：`systemctl start|stop|restart danmu-<名称>`；JVM 起不来时看 `journalctl -u danmu-<名称>`。
-- **后台执行**：初始化、启停、发布、回滚、保存配置都在后台跑 Ansible，接口立即返回 `taskId`，发起操作的页面用 `/ops/task/get` 读实时输出。同一个程序同一时间只能有一个。谁做了什么、成功还是失败，在结束时写入操作日志，没有单独的历史页。
+- **程序**：保存在 `ops_app`，每条绑定一台主机和它上面的一个目录（绝对路径，自己配置，例如 `/usr/local/games/game1`）。同一台主机上名称、目录都不能重复。
+  - 登记时把 `ops-scripts/app.sh` 拷到 `<目录>/bin/app.sh`，每次发布前再覆盖成最新版本。所有程序共用这一份脚本，它从自己所在位置推导程序目录，不需要参数或配置。
+  - 启停、发布、回滚、日志、配置文件都是通过 SSH 执行 `bash <目录>/bin/app.sh <命令>`；在服务器上手动执行 `<目录>/bin/app.sh start|stop|restart|status` 效果一样。没有 systemd，也没有自动拉起。
+- **后台执行**：初始化、启停、发布、回滚、保存配置都在后台执行，接口立即返回 `taskId`，发起操作的页面用 `/ops/task/get` 读实时输出。同一个程序同一时间只能有一个。谁做了什么、成功还是失败，在结束时写入操作日志，没有单独的历史页。
 - **监控**：主机「初始化」时装上 node_exporter、process-exporter，由 Prometheus 拉取；「主机监控」页嵌入 Grafana 的面板（经 nginx 以同源的 `/grafana/` 访问）。管理后台只负责把主机列表写给 Prometheus（`ops.prometheus.targets-dir`）和提供下拉选项。
 
-playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一的 `bin` 脚本在 danmu 根目录的 `ops/bin`，Prometheus、Grafana 的配置和面板在 `ops/monitoring`，见 `ops/README.md`。
+`app.sh`、`host_init.sh` 在 admin-server 的 `ops-scripts/` 目录，随程序一起打包。
 
-管理后台自己不登记到运维中心：它和其他服务一样用 `mvn package` 打出 `target/admin-server`（bin、conf、lib、ansible），在服务器上手动执行 `bin/start.sh`、`bin/stop.sh` 启停。
+## 程序目录的格式
+
+`app.sh` 只认这个格式：
+
+| 路径 | 说明 |
+| --- | --- |
+| `bin/app.sh` | 管理后台拷进来的管理脚本 |
+| `lib/` | jar，其中恰好一个 jar 的 MANIFEST 带 `Main-Class`；`lib/extra/` 也在 classpath 上 |
+| `conf/` | 配置文件，放在 classpath 最前面；`conf/jvm.options` 为 JVM 参数（每行一个，`#` 开头和空行忽略，可以没有） |
+| `excel/` | 可选 |
+| `logs/` | 程序自己写的日志；`console.log` 为最近一次启动的控制台输出（JVM 起不来时看这里） |
+| `app.pid` | 运行中的进程号 |
+| `backup/<时间>/` | 发布、回滚前的 `lib`、`conf`、`excel` |
+| `backup-conf/<时间>/` | 在线修改配置前的旧文件 |
+
+启动命令：`cd <目录> && java <jvm.options> -Dhost.app.dir=<目录> -cp conf:lib/*:lib/extra/* <Main-Class>`，在后台运行（`setsid`），3 秒后进程还在才算启动成功。`java` 取 `$JAVA_HOME/bin/java`，没有设置时用 PATH 里的。`-Dhost.app.dir` 用来确认 `app.pid` 里的进程确实是这个程序，process-exporter 也按它区分进程。停止先发 SIGTERM，30 秒内没退出就 `kill -9`。
+
+| `app.sh` 命令 | 作用 |
+| --- | --- |
+| `start`、`stop`、`restart` | 启停；已在运行时 start 直接返回 |
+| `status` | 每行 `key=value`：`deployed`、`running`，运行中时还有 `pid`、`elapsed`（秒）、`rss`（KB）、`cpu_ms` |
+| `log [文件] [行数]` | `logs/` 下 `server.log`、`error.log`、`console.log` 的最后几行 |
+| `deploy <zip> [--overwrite-conf] [--keep 份数]` | 发布，见下文 |
+| `backups`、`rollback <备份名>` | 回滚，见下文 |
+| `conf-list`、`conf-get <文件>`、`conf-put <文件>` | 列出、读取、保存 `conf/` 下的文件（conf-put 从标准输入读内容） |
 
 ## 管理后台的配置
 
@@ -21,13 +44,13 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 | 配置 | 说明 |
 | --- | --- |
 | `ops.ssh.user`、`ops.ssh.key` | 登录服务器的账号（默认 root）和私钥，所有主机共用。公钥要加到每台服务器的 `/root/.ssh/authorized_keys` |
-| `ops.ansible.dir` | playbook 目录，默认工作目录下的 `ansible` |
+| `ops.script.dir` | `app.sh`、`host_init.sh` 所在目录，默认工作目录下的 `ops-scripts` |
 | `ops.upload.dir` | 上传的程序包暂存目录 |
 | `ops.backup.keep` | 发布时程序目录 `backup/` 下保留的旧版本数 |
 | `ops.prometheus.targets-dir` | 写给 Prometheus 的主机列表目录（file_sd 的 `node.json`、`process.json`），启动时和主机增删改后重写；为空时不写 |
 | `ops.exporter.node-port`、`ops.exporter.process-port` | 业务服务器上 node_exporter、process-exporter 的端口（默认 9100、9256）：「初始化」按它配置，写给 Prometheus 的主机列表按它生成 |
 
-管理后台所在机器（管理机）由 danmu 的 `ops/deploy.sh` 部署，以上配置都由它的环境文件生成，见 `ops/README.md`。第一次连接一台主机时自动记住它的指纹（`StrictHostKeyChecking=accept-new`）。
+管理后台所在机器需要有 OpenSSH 客户端（`ssh` 命令）。第一次连接一台主机时自动记住它的指纹（`StrictHostKeyChecking=accept-new`），连接超时 10 秒。
 
 ## 权限
 
@@ -40,7 +63,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 | `ops_app:control` | 启动、停止、重启（「保存并重启」也需要） |
 | `ops_app:deploy` | 上传并发布、回滚 |
 | `ops_app:config` | 查看和保存 conf 下的文件（可能含密码，查看也需要这个按钮） |
-| `ops_monitor` | 主机监控（嵌入的 Grafana 面板本身是匿名只读，不经过这里的权限，见 `ops/README.md`） |
+| `ops_monitor` | 主机监控（嵌入的 Grafana 面板本身是匿名只读，不经过这里的权限） |
 
 主机下拉选项（`/ops/host/options`）有 `ops_host`、`ops_app`、`ops_monitor` 之一即可；读取这次操作的输出（`/ops/task/get`）有 `ops_app` 或 `ops_host` 即可。
 
@@ -56,7 +79,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 - `initializedAt`：初始化成功的时间，0 表示还没有初始化
 - `lastSeenAt`、`createdAt`
 - `appCount`：绑定的程序数
-- `runningCount`：正在运行的 `danmu-*` 服务数
+- `runningCount`：正在运行的程序数（命令行带 `-Dhost.app.dir=` 的进程）
 - `error`：连不上或读取失败时的原因
 - `info`：连上且读取成功时返回
 
@@ -103,9 +126,9 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 {"hostId":1}
 ```
 
-需要 `ops_host:manage`。执行 `init.yml`，返回 `{taskId}`。成功后记下 `initializedAt`。可以重复执行。
+需要 `ops_host:manage`。把 `host_init.sh` 送给服务器上的 `bash -s` 执行，返回 `{taskId}`。成功后记下 `initializedAt`。可以重复执行。
 - apt 安装 `openjdk-21-jre-headless`、`unzip`。
-- 监控：安装并配置 `prometheus-node-exporter`（9100，开启 systemd 收集器，只报告 `danmu-*` 服务）、`prometheus-process-exporter`（9256，按命令行里的 `-Dhost.app.dir=<目录>` 把进程归到程序）。两个端口只需要对 Prometheus 所在机器开放。
+- 监控：安装并配置 `prometheus-node-exporter`（9100）、`prometheus-process-exporter`（9256，按命令行里的 `-Dhost.app.dir=<目录>` 把进程归到程序），配置变了才重启。两个端口只需要对 Prometheus 所在机器开放。
 
 ## 程序
 
@@ -124,13 +147,11 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 
 | `state` 字段 | 说明 |
 | --- | --- |
+| `status` | `running`（运行中）、`stopped`（已停止）、`not-deployed`（`lib` 下还没有 jar）、`no-script`（目录里没有 `bin/app.sh`，发布时会拷过去） |
 | `deployed` | `lib` 下有 jar |
-| `status` | systemd 的 ActiveState：`active`、`inactive`、`failed`、`activating` 等；服务还没生成时为 `not-found` |
 | `running`、`pid` | 是否运行中、进程号 |
-| `unmanaged` | 运行中但不归 systemd 管（用 `bin/start.sh` 在后台启动的，例如以前的 host 启动的）；下次启动、发布时会先用 `bin/stop.sh` 停掉再交给 systemd |
-| `restarts` | systemd 自动拉起的次数 |
 | `startTime` | 启动时间，毫秒 |
-| `memory` | 内存（systemd 统计的 cgroup 内存），字节 |
+| `memory` | 常驻内存（RSS），字节 |
 | `cpuUsage` | 两次查询之间的 CPU 使用率，0～1 |
 
 ### `POST /ops/app/create`、`POST /ops/app/update`
@@ -144,7 +165,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 - `dir`：绝对路径，只能包含字母、数字、`_ . - /`，最长 256；同一台主机上不能重复
 - `remark`：最长 128
 
-只保存登记，不连接服务器。修改名称、主机、目录时程序必须已停止；名称或主机变了会删除旧主机上旧名称的 systemd 服务。
+新建时先把 `app.sh` 拷到 `<目录>/bin/`（目录不存在时创建），连不上主机就不保存。修改主机、目录时程序必须已停止，会把 `app.sh` 拷到新目录，旧目录不动。有操作正在执行时不能修改。
 
 ### `POST /ops/app/remove`
 
@@ -152,7 +173,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 {"appId":1}
 ```
 
-需要 `ops_app:manage`。程序必须已停止。删除登记和 systemd 服务，不删除程序目录。
+需要 `ops_app:manage`。程序必须已停止，且没有操作正在执行。只删除登记，不改动服务器上的程序目录。
 
 ### `POST /ops/app/control`
 
@@ -160,11 +181,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 {"appId":1,"action":"restart"}
 ```
 
-需要 `ops_app:control`。`action` 为 `start`、`stop`、`restart`，返回 `{taskId}`。执行 `app_control.yml`：
-1. 生成（或更新）systemd 服务。
-2. 启动、重启时先接管不归 systemd 管的旧进程。
-3. `systemctl start|stop|restart danmu-<名称>`。
-4. 启动、重启后观察 5 秒：状态仍是 active 且没有被自动拉起才算成功；失败时输出 journal 的最后 30 行。
+需要 `ops_app:control`。`action` 为 `start`、`stop`、`restart`，返回 `{taskId}`。执行 `bin/app.sh <action>`；启动失败时输出 `logs/console.log` 的最后 30 行。
 
 ### `POST /ops/app/log`
 
@@ -172,7 +189,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 {"appId":1,"lines":200,"file":"server.log"}
 ```
 
-返回 `{content}`：程序 logback 写入的 `logs/<file>` 的最后 `lines` 行。`file` 为 `server.log`（全部日志，默认）或 `error.log`（只有 ERROR）；默认 200，上限 2000，最多读取末尾 1MB。
+返回 `{content}`：`logs/<file>` 的最后 `lines` 行。`file` 为 `server.log`（全部日志，默认）、`error.log`（只有 ERROR）或 `console.log`（最近一次启动的控制台输出）；默认 200，上限 2000，最多读取末尾 1MB。
 
 ### `POST /ops/app/config/list`、`/ops/app/config/get`、`/ops/app/config/save`
 
@@ -182,27 +199,27 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 {"appId":1,"file":"application.properties","content":"...","restart":false}
 ```
 
-需要 `ops_app:config`。`file` 为相对 `conf` 的路径，不能跳出 `conf`；单个文件不超过 1MB，按 UTF-8 读写。返回值：
+需要 `ops_app:config`。`file` 为相对 `conf` 的路径，不能跳出 `conf`；单个文件不超过 1MB，按 UTF-8 读写。分别执行 `app.sh conf-list`、`conf-get`、`conf-put`。返回值：
 - list：`{files}`
 - get：`{content}`
 - save：`{taskId}`。旧文件先备份到程序目录的 `backup-conf/<时间>/`；`restart` 为 true 时保存后重启（还需要 `ops_app:control`）
 
 ## 发布和回滚
 
-需要 `ops_app:deploy`。程序包是 `mvn package` 产物目录（`bin`、`conf`、`lib`、`excel`）打成的 zip，必须带 `bin/start.sh`，外面可以再包一层目录。
+需要 `ops_app:deploy`。程序包是 `lib`、`conf`、`excel` 打成的 zip，外面可以再包一层目录；包里有 `bin` 也不使用。
 
 1. `POST /ops/app/upload/start`，`{"appId":1}`，返回 `{uploadId}`。
 2. `POST /ops/app/upload/chunk`，`{"appId":1,"uploadId":"...","index":0,"data":"base64"}`。`index` 从 0 开始按顺序发送；前端每片 2MB，一片不能超过 4MB（HTTP 请求体上限 16MB）。重发上一片（应答丢失时）会被忽略。程序包先存在管理后台本机的 `ops.upload.dir`，最大 1GB，1 小时没有新分片的被删除。
-3. `POST /ops/app/deploy`，`{"appId":1,"uploadId":"...","overwriteConf":false}`，返回 `{taskId}`。执行 `app_deploy.yml`：
-   - 上传到服务器的临时目录，解压校验。
-   - 生成 systemd 服务，接管旧进程；在运行的先停止。
-   - 更新前备份机器上的 `conf`、`excel`、`lib`、`bin` 到 `backup/<时间>`，只保留 `ops.backup.keep` 份。要替换的目录移进备份，不替换的 `conf` 复制一份，机器上的原文件留在原地。
-   - `conf` 默认不替换；目录里没有 conf，或 `overwriteConf` 为 true 时使用包里的。
-   - 原来在运行的重新启动，并检查启动结果。
+3. `POST /ops/app/deploy`，`{"appId":1,"uploadId":"...","overwriteConf":false}`，返回 `{taskId}`：
+   - 把最新的 `app.sh` 拷到 `<目录>/bin/`，程序包传到服务器的 `/tmp`，然后执行 `app.sh deploy <zip> --keep <ops.backup.keep> [--overwrite-conf]`，结束后删除 zip。
+   - 解压，确认包里有 `lib`、恰好一个 Main-Class；不对就直接失败，不停止正在运行的程序。
+   - 在运行的先停止。备份机器上的 `lib`、`conf`、`excel` 到 `backup/<时间>`，只保留 `ops.backup.keep` 份：要替换的目录移进备份，不替换的复制一份。替换中途失败时恢复原来的版本。
+   - 只替换包里有的目录。`conf` 默认不替换；目录里没有 conf，或 `overwriteConf` 为 true 时使用包里的。
+   - 原来在运行的重新启动。
 
 回滚：
 - `POST /ops/app/backups`，`{"appId":1}`，返回 `{list}`：`backup/` 下的版本名（`yyyyMMdd-HHmmss`），新的在前。
-- `POST /ops/app/rollback`，`{"appId":1,"backup":"20261106-074714"}`，返回 `{taskId}`。备份里有的 `bin`、`lib`、`excel`、`conf` 换回去；当前这些目录先移入 `backup/<现在时间>`，所以回滚本身也能再回滚。原来在运行的回滚后重新启动。
+- `POST /ops/app/rollback`，`{"appId":1,"backup":"20261106-074714"}`，返回 `{taskId}`。执行 `app.sh rollback <备份名>`：备份里有的 `lib`、`conf`、`excel` 换回去（conf 也换回发布那一刻的版本）；当前这些目录先移入 `backup/<现在时间>`，所以回滚本身也能再回滚。原来在运行的回滚后重新启动。
 
 ## 主机监控
 
@@ -238,7 +255,7 @@ playbook 在 admin-server 的 `ansible/` 目录，随程序一起打包；统一
 | 100073 | 这台主机上已有程序使用该目录 |
 | 100074 | 程序配置不合法，message 里是原因 |
 | 100075 | 程序正在运行，请先停止 |
-| 100076 | 执行 Ansible 失败（连不上主机、命令失败），message 里是原因 |
+| 100076 | 执行远程命令失败（连不上主机、命令失败），message 里是原因 |
 | 100077 | 该 IP 的主机已存在 |
 | 100078 | 主机配置不合法 |
 | 100079 | 这台主机上已有同名程序 |

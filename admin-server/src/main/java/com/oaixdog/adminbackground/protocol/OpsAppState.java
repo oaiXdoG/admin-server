@@ -4,27 +4,28 @@ import lombok.Getter;
 import lombok.Setter;
 
 /**
- * 程序的运行状态：通过 SSH 读取 systemd 服务 danmu-&lt;名称&gt; 的状态。
- * status：systemd 的 ActiveState（active、inactive、failed、activating 等）；服务还没生成时为 not-found。
- * unmanaged：不归 systemd 管、用 bin/start.sh 在后台启动的进程（例如以前的 host 启动的），下次启动或发布时会被接管。
+ * 程序的运行状态：通过 SSH 执行程序目录里的 bin/app.sh status 读取。
+ * status：running（运行中）、stopped（已停止）、not-deployed（lib 下还没有 jar）、no-script（bin/app.sh 不存在，重新保存登记或发布会拷过去）。
  */
 @Getter
 @Setter
 public class OpsAppState {
 
+    public static final String RUNNING = "running";
+    public static final String STOPPED = "stopped";
+    public static final String NOT_DEPLOYED = "not-deployed";
+    public static final String NO_SCRIPT = "no-script";
+
     private String dir;
     private String error;
+    private String status;
     /** lib 下有 jar */
     private boolean deployed;
     private boolean running;
-    private boolean unmanaged;
-    private String status;
-    /** systemd 自动拉起的次数（从上次手动启动算起） */
-    private long restarts;
     private long pid;
     /** 毫秒 */
     private long startTime;
-    /** 字节 */
+    /** 常驻内存，字节 */
     private long memory;
     /** 0～1，两次查询之间的平均值，第一次查询为 0 */
     private double cpuUsage;

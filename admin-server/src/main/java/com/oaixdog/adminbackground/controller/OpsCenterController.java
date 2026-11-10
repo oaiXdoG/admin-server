@@ -42,7 +42,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
-/** 运维中心：主机、程序和监控的下拉选项。主机、程序通过 Ansible 管理（启停、发布等返回任务 id，页面轮询输出）；监控曲线在 Grafana */
+/** 运维中心：主机、程序和监控的下拉选项。主机、程序通过 SSH 管理（启停、发布等返回任务 id，页面轮询输出）；监控曲线在 Grafana */
 @Component
 @RequiredArgsConstructor
 public class OpsCenterController {

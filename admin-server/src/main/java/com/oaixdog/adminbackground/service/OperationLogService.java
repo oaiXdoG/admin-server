@@ -41,7 +41,7 @@ public class OperationLogService {
     /** 图片只记是否修改，不保存内容 */
     private static final Set<String> IMAGE_FIELDS = Set.of("logo", "favicon", "avatar");
     /**
-     * 这些接口立刻返回，Ansible 还在后台跑。请求成功时不记日志，等任务结束再记真实结果。
+     * 这些接口立刻返回，远程命令还在后台跑。请求成功时不记日志，等任务结束再记真实结果。
      * 请求当时就失败（参数不合法、已有操作在执行）仍在当时记录。
      */
     private static final Set<String> DEFERRED = Set.of(
@@ -138,7 +138,7 @@ public class OperationLogService {
         }
     }
 
-    /** 后台操作结束时写入。成功与否是 Ansible 的结果，不是接口有没有接住这次请求 */
+    /** 后台操作结束时写入。成功与否是远程命令的结果，不是接口有没有接住这次请求 */
     public void record(Long accountId, String account, String route, String action, Map<String, Object> params,
                        boolean success, int code) {
         try {

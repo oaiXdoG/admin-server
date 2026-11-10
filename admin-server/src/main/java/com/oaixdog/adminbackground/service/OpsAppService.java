@@ -33,19 +33,21 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static com.oaixdog.adminbackground.service.AnsibleRunner.quote;
+import static com.oaixdog.adminbackground.service.SshRunner.quote;
 
 /**
- * 程序：保存在 ops_app，每条绑定一台主机和它上面的一个目录（自己配置）。名称同时是 systemd 服务名 danmu-&lt;名称&gt;。
+ * 程序：保存在 ops_app，每条绑定一台主机和它上面的一个目录（自己配置，例如 /usr/local/games/game1）。
  * <p>
- * 服务器上由 systemd 运行程序：服务执行程序目录里的 bin/start.sh --foreground（JVM 参数在 conf/jvm.options），挂了自动拉起、开机自启。
- * 服务文件在第一次启动或发布时由 Ansible 生成。启停、发布、回滚、保存配置在后台执行（{@link OpsTaskService}），立即返回任务 id；
- * 状态、日志、配置文件的读取直接通过 SSH 执行。
+ * 登记时把 ops-scripts/app.sh 拷到 &lt;目录&gt;/bin/app.sh，每次发布前再覆盖成最新版本。app.sh 从自己所在位置推导程序目录，
+ * 按 lib、conf、excel 的格式启停、发布、回滚，所有操作都是通过 SSH 执行 bash &lt;目录&gt;/bin/app.sh &lt;命令&gt;；
+ * 在服务器上手动执行 bin/app.sh 效果一样。启停、发布、回滚、保存配置在后台执行（{@link OpsTaskService}），立即返回任务 id；
+ * 状态、日志、配置文件的读取直接执行。
  * <p>
  * 查看列表、日志需要 ops_app；新建、编辑、删除需要 ops_app:manage；启停 ops_app:control；发布、回滚 ops_app:deploy；
  * 配置文件（可能有密码）的查看和保存都需要 ops_app:config。
@@ -61,13 +63,14 @@ public class OpsAppService {
     /** conf 下的相对路径 */
     private static final Pattern CONF_FILE = Pattern.compile("[A-Za-z0-9_.\\-]+(/[A-Za-z0-9_.\\-]+)*");
     private static final Pattern BACKUP_NAME = Pattern.compile("\\d{8}-\\d{6}");
+    private static final String APP_SCRIPT = "app.sh";
     private static final int DIR_MAX_LENGTH = 256;
     private static final int REMARK_MAX_LENGTH = 128;
     private static final Set<String> ACTIONS = Set.of("start", "stop", "restart");
     private static final int LOG_LINES_DEFAULT = 200;
     private static final int LOG_LINES_MAX = 2000;
     /** 程序 logback 写入的日志文件，第一个为默认 */
-    private static final List<String> LOG_FILES = List.of("server.log", "error.log");
+    private static final List<String> LOG_FILES = List.of("server.log", "error.log", "console.log");
     private static final long CONF_MAX_SIZE = 1024 * 1024;
     /** 前端每片 2MB，base64 后约 2.7MB，在 HTTP 请求体上限 16MB 以内 */
     private static final int CHUNK_MAX_SIZE = 4 * 1024 * 1024;
@@ -79,7 +82,7 @@ public class OpsAppService {
 
     private final PermissionService permissionService;
     private final ApplicationProperties properties;
-    private final AnsibleRunner ansibleRunner;
+    private final SshRunner sshRunner;
     private final OpsTaskService opsTaskService;
     private final OpsHostService opsHostService;
     private final OpsHostMapper opsHostMapper;
@@ -146,7 +149,7 @@ public class OpsAppService {
         return Map.of("list", list);
     }
 
-    /** 只保存登记；systemd 服务在第一次启动或发布时生成 */
+    /** 先把 app.sh 拷到 &lt;目录&gt;/bin/（目录不存在时创建），成功后再保存登记 */
     public OpsAppResponse create(String authorization, String name, Long hostId, String dir, String remark) {
         permissionService.requireMenu(authorization, MENU + ":manage");
         var app = new OpsApp();
@@ -156,6 +159,7 @@ public class OpsAppService {
         app.setCreatedAt(now);
         app.setUpdatedAt(now);
         requireUnique(app);
+        installScript(host, app.getDir());
         try {
             opsAppMapper.insert(app);
         } catch (DuplicateKeyException exception) {
@@ -164,38 +168,39 @@ public class OpsAppService {
         return OpsAppResponse.valueOf(app, host);
     }
 
-    /** 修改名称、主机、目录时程序必须已停止；名称或主机变了，删除旧主机上旧名称的服务 */
+    /** 修改主机、目录时程序必须已停止，并把 app.sh 拷到新目录；旧目录不动 */
     public OpsAppResponse update(String authorization, Long appId, String name, Long hostId, String dir, String remark) {
         permissionService.requireMenu(authorization, MENU + ":manage");
         OpsApp app = requireApp(appId);
+        requireIdle(app);
         OpsApp old = copy(app);
         OpsHost host = fill(app, name, hostId, dir, remark);
-        boolean moved = !old.getName().equals(app.getName()) || !old.getHostId().equals(app.getHostId());
-        if ((moved || !old.getDir().equals(app.getDir())) && isRunning(old)) {
+        boolean moved = !old.getHostId().equals(app.getHostId()) || !old.getDir().equals(app.getDir());
+        if (moved && isRunning(old)) {
             throw new BusinessException(ErrorCode.OPS_APP_RUNNING);
         }
         app.setUpdatedAt(System.currentTimeMillis());
         requireUnique(app);
+        if (moved) {
+            installScript(host, app.getDir());
+        }
         try {
             opsAppMapper.updateById(app);
         } catch (DuplicateKeyException exception) {
             throw new BusinessException(ErrorCode.OPS_APP_NAME_EXISTS);
         }
-        if (moved) {
-            unregister(old);
-        }
         return OpsAppResponse.valueOf(app, host);
     }
 
-    /** 程序必须已停止；删除登记和 systemd 服务，不删除程序目录 */
+    /** 程序必须已停止；只删除登记，不删除服务器上的程序目录 */
     public void remove(String authorization, Long appId) {
         permissionService.requireMenu(authorization, MENU + ":manage");
         OpsApp app = requireApp(appId);
+        requireIdle(app);
         if (isRunning(app)) {
             throw new BusinessException(ErrorCode.OPS_APP_RUNNING);
         }
         opsAppMapper.deleteById(app.getId());
-        unregister(app);
     }
 
     // ---------------------------------------------------------------- 运维任务
@@ -209,8 +214,7 @@ public class OpsAppService {
         OpsHost host = opsHostService.requireHost(app.getHostId());
         String verb = Map.of("start", "启动", "stop", "停止", "restart", "重启").get(action);
         return opsTaskService.submit(account, action, verb + " " + app.getName() + "（" + host.getIp() + "）", host.getId(), app.getId(),
-                lock(app), out -> ansibleRunner.playbook(List.of(host), "app_control.yml", vars(app, Map.of("app_action", action)),
-                        out, CONTROL_TIMEOUT_SECONDS) == 0);
+                lock(app), out -> runScript(host, app, action, null, out, CONTROL_TIMEOUT_SECONDS));
     }
 
     public long deploy(String authorization, Long appId, String uploadId, Boolean overwriteConf) {
@@ -222,14 +226,18 @@ public class OpsAppService {
             throw new BusinessException(ErrorCode.OPS_UPLOAD_NOT_FOUND);
         }
         uploads.remove(uploadId);
-        Map<String, Object> vars = vars(app, Map.of("package", upload.file.toAbsolutePath().toString(),
-                "overwrite_conf", Boolean.TRUE.equals(overwriteConf), "backup_keep", properties.getOpsBackupKeep()));
+        String remoteZip = "/tmp/app-deploy-" + uploadId + ".zip";
+        String args = quote(remoteZip) + " --keep " + properties.getOpsBackupKeep() + (Boolean.TRUE.equals(overwriteConf) ? " --overwrite-conf" : "");
         try {
             return opsTaskService.submit(account, "deploy", "发布 " + app.getName() + "（" + host.getIp() + "）", host.getId(), app.getId(),
                     lock(app), out -> {
                         try {
-                            out.accept("程序包 " + upload.size + " 字节");
-                            boolean success = ansibleRunner.playbook(List.of(host), "app_deploy.yml", vars, out, DEPLOY_TIMEOUT_SECONDS) == 0;
+                            out.accept("== 更新 bin/app.sh");
+                            installScript(host, app.getDir());
+                            out.accept("== 上传程序包，" + upload.size + " 字节");
+                            sshRunner.exec(host, "cat > " + quote(remoteZip), SshRunner.Input.of(upload.file), DEPLOY_TIMEOUT_SECONDS);
+                            String command = "bash " + script(app) + " deploy " + args + "; rc=$?; rm -f " + quote(remoteZip) + "; exit $rc";
+                            boolean success = sshRunner.run(host, command, null, out, DEPLOY_TIMEOUT_SECONDS) == 0;
                             if (success) {
                                 var deployed = new OpsApp();
                                 deployed.setId(app.getId());
@@ -251,8 +259,7 @@ public class OpsAppService {
     public Map<String, Object> backups(String authorization, Long appId) {
         permissionService.requireMenu(authorization, MENU + ":deploy");
         OpsApp app = requireApp(appId);
-        String output = ansibleRunner.shell(host(app), "ls -1 " + quote(app.getDir() + "/backup") + " 2>/dev/null | sort -r || true",
-                READ_TIMEOUT_SECONDS);
+        String output = sshRunner.exec(host(app), "bash " + script(app) + " backups", READ_TIMEOUT_SECONDS);
         List<String> list = Arrays.stream(output.split("\n")).map(String::trim)
                 .filter(it -> BACKUP_NAME.matcher(it).matches()).toList();
         return Map.of("list", list);
@@ -266,8 +273,7 @@ public class OpsAppService {
         OpsApp app = requireApp(appId);
         OpsHost host = opsHostService.requireHost(app.getHostId());
         return opsTaskService.submit(account, "rollback", "回滚 " + app.getName() + " 到 " + backup + "（" + host.getIp() + "）",
-                host.getId(), app.getId(), lock(app), out -> ansibleRunner.playbook(List.of(host), "app_rollback.yml",
-                        vars(app, Map.of("backup", backup)), out, DEPLOY_TIMEOUT_SECONDS) == 0);
+                host.getId(), app.getId(), lock(app), out -> runScript(host, app, "rollback " + backup, null, out, DEPLOY_TIMEOUT_SECONDS));
     }
 
     // ---------------------------------------------------------------- 日志、配置文件
@@ -280,18 +286,14 @@ public class OpsAppService {
             throw new BusinessException(ErrorCode.INVALID_REQUEST);
         }
         int count = Math.clamp(lines == null ? LOG_LINES_DEFAULT : lines, 1, LOG_LINES_MAX);
-        String path = quote(app.getDir() + "/logs/" + name);
-        String content = ansibleRunner.shell(host(app),
-                "if [ -f " + path + " ]; then tail -c 1048576 " + path + " | tail -n " + count + "; fi", READ_TIMEOUT_SECONDS);
+        String content = sshRunner.exec(host(app), "bash " + script(app) + " log " + name + " " + count, READ_TIMEOUT_SECONDS);
         return Map.of("content", content);
     }
 
     public Map<String, Object> configList(String authorization, Long appId) {
         permissionService.requireMenu(authorization, MENU + ":config");
         OpsApp app = requireApp(appId);
-        String conf = quote(app.getDir() + "/conf");
-        String output = ansibleRunner.shell(host(app), "if [ -d " + conf + " ]; then cd " + conf + " && find . -type f | sed 's#^./##' | sort; fi",
-                READ_TIMEOUT_SECONDS);
+        String output = sshRunner.exec(host(app), "bash " + script(app) + " conf-list", READ_TIMEOUT_SECONDS);
         List<String> files = Arrays.stream(output.split("\n")).map(String::trim).filter(it -> !it.isEmpty()).toList();
         return Map.of("files", files);
     }
@@ -299,18 +301,8 @@ public class OpsAppService {
     public Map<String, Object> configGet(String authorization, Long appId, String file) {
         permissionService.requireMenu(authorization, MENU + ":config");
         OpsApp app = requireApp(appId);
-        String path = quote(app.getDir() + "/conf/" + requireConfFile(file));
-        String output = ansibleRunner.shell(host(app), "if [ ! -f " + path + " ]; then echo missing; elif [ $(stat -c %s " + path + ") -gt "
-                + CONF_MAX_SIZE + " ]; then echo large; else echo ok; base64 -w0 " + path + "; fi", READ_TIMEOUT_SECONDS);
-        String[] parts = output.split("\n", 2);
-        switch (parts[0].trim()) {
-            case "missing" -> throw new BusinessException(ErrorCode.OPS_APP_INVALID, "文件不存在：" + file);
-            case "large" -> throw new BusinessException(ErrorCode.OPS_APP_INVALID, "文件超过 1MB，不能在线查看：" + file);
-            default -> {
-                String encoded = parts.length > 1 ? parts[1].trim() : "";
-                return Map.of("content", new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8));
-            }
-        }
+        String content = sshRunner.exec(host(app), "bash " + script(app) + " conf-get " + quote(requireConfFile(file)), READ_TIMEOUT_SECONDS);
+        return Map.of("content", content);
     }
 
     /** 保存时旧文件备份到程序目录的 backup-conf/；restart 为 true 时保存后重启 */
@@ -327,16 +319,18 @@ public class OpsAppService {
         if (bytes.length > CONF_MAX_SIZE) {
             throw new BusinessException(ErrorCode.OPS_APP_INVALID, "文件不能超过 1MB");
         }
-        Map<String, Object> vars = vars(app, Map.of("file", name, "content_b64", Base64.getEncoder().encodeToString(bytes),
-                "restart", restartAfter));
         String title = "保存 " + app.getName() + " 的 conf/" + name + (restartAfter ? " 并重启" : "") + "（" + host.getIp() + "）";
-        return opsTaskService.submit(account, "config", title, host.getId(), app.getId(), lock(app),
-                out -> ansibleRunner.playbook(List.of(host), "app_config_save.yml", vars, out, CONTROL_TIMEOUT_SECONDS) == 0);
+        return opsTaskService.submit(account, "config", title, host.getId(), app.getId(), lock(app), out -> {
+            if (!runScript(host, app, "conf-put " + quote(name), SshRunner.Input.of(bytes), out, CONTROL_TIMEOUT_SECONDS)) {
+                return false;
+            }
+            return !restartAfter || runScript(host, app, "restart", null, out, CONTROL_TIMEOUT_SECONDS);
+        });
     }
 
     // ---------------------------------------------------------------- 上传
 
-    /** 程序包先分片上传到管理后台本机的 ops.upload.dir，发布时再由 Ansible 复制到服务器；1 小时没有新分片的上传被删除 */
+    /** 程序包先分片上传到管理后台本机的 ops.upload.dir，发布时再通过 SSH 传到服务器；1 小时没有新分片的上传被删除 */
     public Map<String, Object> uploadStart(String authorization, Long appId) {
         permissionService.requireMenu(authorization, MENU + ":deploy");
         OpsApp app = requireApp(appId);
@@ -424,26 +418,15 @@ public class OpsAppService {
 
     // ---------------------------------------------------------------- 状态
 
-    /** 一次 SSH 读出这台主机上这些程序的状态，程序 id → 状态 */
+    /** 一次 SSH 读出这台主机上这些程序的状态（逐个执行 bin/app.sh status），程序 id → 状态 */
     private Map<Long, OpsAppState> status(OpsHost host, List<OpsApp> apps) {
-        StringBuilder script = new StringBuilder();
+        StringBuilder command = new StringBuilder();
         for (OpsApp app : apps) {
-            String dir = quote(app.getDir());
-            String unit = quote("danmu-" + app.getName());
-            String marker = quote("-Dhost.app.dir=" + app.getDir() + " ");
-            script.append("echo @app=").append(app.getId()).append('\n')
-                    .append("systemctl show ").append(unit)
-                    .append(" -p LoadState -p ActiveState -p MainPID -p NRestarts -p MemoryCurrent -p CPUUsageNSec 2>/dev/null\n")
-                    .append("pid=$(systemctl show ").append(unit).append(" -p MainPID --value 2>/dev/null)\n")
-                    .append("if [ \"${pid:-0}\" != 0 ]; then echo \"Elapsed=$(ps -o etimes= -p $pid | tr -d ' ')\"; fi\n")
-                    .append("if ls ").append(dir).append("/lib/*.jar >/dev/null 2>&1; then echo Deployed=1; fi\n")
-                    // 不归 systemd 管、用 bin/start.sh 在后台启动的进程
-                    .append("old=$(cat ").append(dir).append("/app.pid 2>/dev/null | tr -dc 0-9)\n")
-                    .append("if [ -n \"$old\" ] && [ \"$old\" != \"${pid:-0}\" ] && ps -ww -o args= -p \"$old\" 2>/dev/null | grep -qF -- ")
-                    .append(marker).append("; then echo \"Unmanaged=$old\"; echo \"UnmanagedElapsed=$(ps -o etimes= -p $old | tr -d ' ')\"; ")
-                    .append("echo \"UnmanagedRss=$(ps -o rss= -p $old | tr -d ' ')\"; fi\n");
+            command.append("echo @app=").append(app.getId()).append("; ")
+                    .append("if [ -f ").append(script(app)).append(" ]; then bash ").append(script(app)).append(" status; ")
+                    .append("else echo script=0; fi; ");
         }
-        String output = ansibleRunner.shell(host, script.toString(), READ_TIMEOUT_SECONDS);
+        String output = sshRunner.exec(host, command.toString(), READ_TIMEOUT_SECONDS);
         Map<Long, Map<String, String>> values = new HashMap<>();
         Map<String, String> current = null;
         for (String line : output.split("\n")) {
@@ -462,28 +445,25 @@ public class OpsAppService {
             var state = new OpsAppState();
             state.setDir(app.getDir());
             state.setError("");
-            state.setDeployed(v.containsKey("Deployed"));
-            boolean loaded = "loaded".equals(v.get("LoadState"));
-            state.setStatus(loaded ? v.getOrDefault("ActiveState", "unknown") : "not-found");
-            state.setRestarts(parseLong(v.get("NRestarts")));
-            long pid = parseLong(v.get("MainPID"));
-            if ("active".equals(state.getStatus()) && pid > 0) {
-                state.setRunning(true);
+            state.setDeployed("1".equals(v.get("deployed")));
+            state.setRunning("1".equals(v.get("running")));
+            if ("0".equals(v.get("script"))) {
+                state.setStatus(OpsAppState.NO_SCRIPT);
+            } else if (state.isRunning()) {
+                state.setStatus(OpsAppState.RUNNING);
+            } else {
+                state.setStatus(state.isDeployed() ? OpsAppState.STOPPED : OpsAppState.NOT_DEPLOYED);
+            }
+            if (state.isRunning()) {
+                long pid = parseLong(v.get("pid"));
                 state.setPid(pid);
-                state.setStartTime(now - parseLong(v.get("Elapsed")) * 1000);
-                long memory = parseLong(v.get("MemoryCurrent"));
-                state.setMemory(memory > 0 && memory < Long.MAX_VALUE / 2 ? memory : 0);
-                long cpu = parseLong(v.get("CPUUsageNSec"));
+                state.setStartTime(now - parseLong(v.get("elapsed")) * 1000);
+                state.setMemory(parseLong(v.get("rss")) * 1024);
+                long cpu = parseLong(v.get("cpu_ms"));
                 long[] last = lastCpu.put(app.getId(), new long[]{cpu, now, pid});
                 if (last != null && last[2] == pid && now > last[1] && cpu >= last[0]) {
-                    state.setCpuUsage((cpu - last[0]) / 1e6 / (now - last[1]) / cores);
+                    state.setCpuUsage((double) (cpu - last[0]) / (now - last[1]) / cores);
                 }
-            } else if (v.containsKey("Unmanaged")) {
-                state.setRunning(true);
-                state.setUnmanaged(true);
-                state.setPid(parseLong(v.get("Unmanaged")));
-                state.setStartTime(now - parseLong(v.get("UnmanagedElapsed")) * 1000);
-                state.setMemory(parseLong(v.get("UnmanagedRss")) * 1024);
             } else {
                 lastCpu.remove(app.getId());
             }
@@ -507,24 +487,6 @@ public class OpsAppService {
         }
     }
 
-    /** 删除服务，失败时只记日志（例如主机已经下线） */
-    private void unregister(OpsApp app) {
-        OpsHost host = opsHostMapper.selectById(app.getHostId());
-        if (host == null) {
-            return;
-        }
-        StringBuilder output = new StringBuilder();
-        try {
-            int code = ansibleRunner.playbook(List.of(host), "app_unregister.yml", Map.of("app_name", app.getName()),
-                    line -> output.append(line).append('\n'), 60);
-            if (code != 0) {
-                log.warn("删除 systemd 服务失败，app={}，输出：{}", app.getName(), output);
-            }
-        } catch (BusinessException exception) {
-            log.warn("删除 systemd 服务失败，app={}，{}", app.getName(), exception.getMessage());
-        }
-    }
-
     // ---------------------------------------------------------------- 工具
 
     private OpsApp requireApp(Long appId) {
@@ -543,11 +505,38 @@ public class OpsAppService {
         return "app:" + app.getId();
     }
 
-    private static Map<String, Object> vars(OpsApp app, Map<String, Object> extra) {
-        Map<String, Object> vars = new HashMap<>(extra);
-        vars.put("app_name", app.getName());
-        vars.put("app_dir", app.getDir());
-        return vars;
+    /** 程序目录里的 bin/app.sh，已加引号 */
+    private static String script(OpsApp app) {
+        return quote(app.getDir() + "/bin/" + APP_SCRIPT);
+    }
+
+    /** 执行 bin/app.sh 的一个子命令（args 已加引号），输出交给 out，返回是否成功 */
+    private boolean runScript(OpsHost host, OpsApp app, String args, SshRunner.Input input, Consumer<String> out,
+                              long timeoutSeconds) {
+        return sshRunner.run(host, "bash " + script(app) + " " + args, input, out, timeoutSeconds) == 0;
+    }
+
+    /** 把最新的 ops-scripts/app.sh 拷到 &lt;dir&gt;/bin/app.sh：先写临时文件再替换，正在执行的旧脚本不受影响 */
+    private void installScript(OpsHost host, String dir) {
+        byte[] content;
+        Path file = Path.of(properties.getOpsScriptDir(), APP_SCRIPT);
+        try {
+            content = Files.readAllBytes(file);
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.OPS_SSH_FAILED, "读取 " + file.toAbsolutePath() + " 失败：" + e.getMessage());
+        }
+        String bin = quote(dir + "/bin");
+        String target = quote(dir + "/bin/" + APP_SCRIPT);
+        String temp = quote(dir + "/bin/." + APP_SCRIPT + ".new");
+        sshRunner.exec(host, "mkdir -p " + bin + " && cat > " + temp + " && chmod 755 " + temp + " && mv -f " + temp + " " + target,
+                SshRunner.Input.of(content), READ_TIMEOUT_SECONDS);
+    }
+
+    /** 有任务在执行时不能修改、删除登记 */
+    private void requireIdle(OpsApp app) {
+        if (opsTaskService.isBusy(lock(app))) {
+            throw new BusinessException(ErrorCode.OPS_TASK_BUSY);
+        }
     }
 
     private OpsHost fill(OpsApp app, String name, Long hostId, String dir, String remark) {

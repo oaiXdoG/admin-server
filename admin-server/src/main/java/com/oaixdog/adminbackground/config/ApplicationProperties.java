@@ -63,9 +63,9 @@ public class ApplicationProperties {
     @Value("${backup.pg-dump:pg_dump}")
     private String backupPgDump;
 
-    /** 运维中心：Ansible playbook 目录（相对于工作目录，即程序目录下的 ansible/） */
-    @Value("${ops.ansible.dir:ansible}")
-    private String opsAnsibleDir;
+    /** 运维中心：app.sh、host_init.sh 所在目录（相对于工作目录，即程序目录下的 ops-scripts/） */
+    @Value("${ops.script.dir:ops-scripts}")
+    private String opsScriptDir;
 
     /** 运维中心：登录服务器的账号和私钥，所有主机共用 */
     @Value("${ops.ssh.user:root}")

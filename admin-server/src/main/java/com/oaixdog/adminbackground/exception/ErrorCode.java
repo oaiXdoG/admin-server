@@ -123,7 +123,7 @@ public enum ErrorCode {
     OPS_APP_DIR_EXISTS(100073, "这台主机上已有程序使用该目录"),
     OPS_APP_INVALID(100074, "程序配置不合法"),
     OPS_APP_RUNNING(100075, "程序正在运行，请先停止"),
-    OPS_ANSIBLE_FAILED(100076, "执行 Ansible 失败"),
+    OPS_SSH_FAILED(100076, "执行远程命令失败"),
     OPS_HOST_EXISTS(100077, "该 IP 的主机已存在"),
     OPS_HOST_INVALID(100078, "主机配置不合法"),
     OPS_APP_NAME_EXISTS(100079, "这台主机上已有同名程序"),

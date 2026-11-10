@@ -23,7 +23,7 @@ import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 /**
- * 初始化主机、启停、发布、回滚、保存配置都在后台线程里执行 Ansible，请求立即返回任务 id。
+ * 初始化主机、启停、发布、回滚、保存配置都在后台线程里通过 SSH 执行，请求立即返回任务 id。
  * 执行中的输出在内存里，发起操作的页面按 offset 增量读取；结束后输出写入 ops_task。
  * 谁做了什么、成功还是失败，在任务结束时写入操作日志。同一个程序（或主机初始化）同一时间只能有一个任务。
  * 管理后台重启时，还在执行中的任务记为失败。
@@ -163,7 +163,7 @@ public class OpsTaskService implements InitializingBean {
             params.put("appId", appId);
         }
         operationLogService.record(account == null ? null : account.getId(), accountName, routeOf(type), actionOf(type), params,
-                success, success ? 0 : ErrorCode.OPS_ANSIBLE_FAILED.getCode());
+                success, success ? 0 : ErrorCode.OPS_SSH_FAILED.getCode());
     }
 
     private static String routeOf(String type) {

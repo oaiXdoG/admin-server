@@ -87,7 +87,7 @@
         bin/                 统一的启停脚本，源文件在 danmu 根目录的 ops/bin；后台在服务器上手动执行 bin/start.sh、bin/stop.sh 启停
         conf/                配置文件（含 jvm.options）
         db/                  schema.sql 和 migration/ 升级脚本（部署时执行）
-        ansible/             运维中心的 Ansible playbook（管理后台所在机器需要安装 ansible-core）
+        ops-scripts/         运维中心的 app.sh（拷到每个程序的 bin/）和 host_init.sh
         lib/admin-server.jar 程序 jar，MANIFEST 带 Main-Class
         lib/extra/           依赖 jar
     -->
@@ -169,17 +169,17 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <!-- 运维中心的 Ansible playbook -->
-                        <id>copy-ansible</id>
+                        <!-- 运维中心的 app.sh、host_init.sh -->
+                        <id>copy-ops-scripts</id>
                         <phase>package</phase>
                         <goals>
                             <goal>copy-resources</goal>
                         </goals>
                         <configuration>
-                            <outputDirectory>${dist.directory}/ansible</outputDirectory>
+                            <outputDirectory>${dist.directory}/ops-scripts</outputDirectory>
                             <resources>
                                 <resource>
-                                    <directory>ansible</directory>
+                                    <directory>ops-scripts</directory>
                                 </resource>
                             </resources>
                         </configuration>

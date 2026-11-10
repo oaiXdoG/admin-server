@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Getter;
 import lombok.Setter;
 
-/** 运维中心的主机：在后台手动添加，管理后台用 Ansible 通过 SSH（ip:sshPort）管理；hostname 为读到的系统主机名，只用于展示 */
+/** 运维中心的主机：在后台手动添加，管理后台通过 SSH（ip:sshPort）管理；hostname 为读到的系统主机名，只用于展示 */
 @Getter
 @Setter
 @TableName("ops_host")

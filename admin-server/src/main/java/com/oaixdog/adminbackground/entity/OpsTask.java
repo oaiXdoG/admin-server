@@ -6,7 +6,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Getter;
 import lombok.Setter;
 
-/** 一次 Ansible 执行的过程和输出，见 OpsTaskService。谁做了什么记在操作日志 */
+/** 一次后台运维操作（通过 SSH 执行）的过程和输出，见 OpsTaskService。谁做了什么记在操作日志 */
 @Getter
 @Setter
 @TableName("ops_task")

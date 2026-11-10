@@ -15,6 +15,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -25,8 +29,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * 主机：在后台手动添加（IP、SSH 端口），管理后台用 Ansible 以 ops.ssh.user 通过 SSH 管理。
- * 「初始化」安装程序运行需要的 JDK、unzip 和监控用的 node_exporter、process-exporter（主机列表由 {@link OpsPrometheusTargets} 写给 Prometheus）；主机列表通过 SSH 读取实时信息（每台主机一次 SSH，结果缓存 10 秒）。
+ * 主机：在后台手动添加（IP、SSH 端口），管理后台以 ops.ssh.user 通过 SSH 管理。
+ * 「初始化」执行 ops-scripts/host_init.sh，安装程序运行需要的 JDK、unzip 和监控用的 node_exporter、process-exporter
+ * （主机列表由 {@link OpsPrometheusTargets} 写给 Prometheus）；主机列表通过 SSH 读取实时信息（每台主机一次 SSH，结果缓存 10 秒）。
  * <p>
  * 查看需要 ops_host（或 ops_app）；下拉选项 ops_host、ops_app、ops_monitor 任一即可；添加、编辑、删除、测试连接、初始化需要 ops_host:manage。
  */
@@ -44,10 +49,11 @@ public class OpsHostService {
     private static final long PROBE_CACHE_MILLIS = 10_000;
     private static final long PROBE_TIMEOUT_SECONDS = 30;
     private static final long INIT_TIMEOUT_SECONDS = 900;
+    private static final String INIT_SCRIPT = "host_init.sh";
 
     /**
      * 一次 SSH 读出主机信息，每行 key=value；CPU、网络取 1 秒内的变化。只用 POSIX sh（Ubuntu 的 /bin/sh 是 dash）。
-     * running：正在运行的 danmu-* 服务数。
+     * running：正在运行的程序数（命令行带 -Dhost.app.dir= 的进程，见 app.sh）。
      */
     private static final String PROBE_SCRIPT = """
             . /etc/os-release 2>/dev/null
@@ -62,12 +68,12 @@ public class OpsHostService {
             echo "$n1 $n2" | awk '{printf "net_in=%d\\nnet_out=%d\\n",$3-$1,$4-$2}'
             awk '/^MemTotal:/{printf "mem_total=%d\\n",$2*1024}/^MemAvailable:/{printf "mem_available=%d\\n",$2*1024}' /proc/meminfo
             echo "uptime=$(cut -d. -f1 /proc/uptime)"
-            echo "running=$(systemctl list-units 'danmu-*' --state=active --no-legend 2>/dev/null | wc -l)"
+            echo "running=$(pgrep -fc 'Dhost[.]app[.]dir=' || true)"
             df -B1 -x tmpfs -x devtmpfs -x overlay -x squashfs --output=source,target,size,used 2>/dev/null | awk 'NR>1{print "disk="$1" "$2" "$3" "$4}'
             """;
 
     private final PermissionService permissionService;
-    private final AnsibleRunner ansibleRunner;
+    private final SshRunner sshRunner;
     private final OpsTaskService opsTaskService;
     private final OpsHostMapper opsHostMapper;
     private final OpsAppMapper opsAppMapper;
@@ -165,20 +171,26 @@ public class OpsHostService {
     public String test(String authorization, Long hostId) {
         permissionService.requireMenu(authorization, MENU + ":manage");
         OpsHost host = requireHost(hostId);
-        String output = ansibleRunner.shell(host, ". /etc/os-release 2>/dev/null; echo \"$(hostname) · ${PRETTY_NAME:-$(uname -s)}\"", 30);
+        String output = sshRunner.exec(host, ". /etc/os-release 2>/dev/null; echo \"$(hostname) · ${PRETTY_NAME:-$(uname -s)}\"", 30);
         String hostname = output.contains(" · ") ? output.substring(0, output.indexOf(" · ")) : output;
         seen(host, hostname);
         return "连接成功：" + output.strip();
     }
 
-    /** 初始化：执行 init.yml（安装 JDK 21、unzip），返回任务 id */
+    /** 初始化：把 host_init.sh 送给 bash -s 执行（安装 JDK 21、unzip 和两个 exporter），返回任务 id */
     public long init(String authorization, Long hostId) {
         Account account = permissionService.requireMenu(authorization, MENU + ":manage");
         OpsHost host = requireHost(hostId);
+        Path file = Path.of(properties.getOpsScriptDir(), INIT_SCRIPT);
+        byte[] script;
+        try {
+            script = Files.readAllBytes(file);
+        } catch (IOException e) {
+            throw new BusinessException(ErrorCode.OPS_SSH_FAILED, "读取 " + file.toAbsolutePath() + " 失败：" + e.getMessage());
+        }
+        String command = "bash -s -- " + properties.getOpsNodeExporterPort() + " " + properties.getOpsProcessExporterPort();
         return opsTaskService.submit(account, "init", "初始化主机 " + host.getIp(), host.getId(), 0, "host:" + host.getId(), out -> {
-            Map<String, Object> vars = Map.of("node_exporter_port", properties.getOpsNodeExporterPort(),
-                    "process_exporter_port", properties.getOpsProcessExporterPort());
-            int code = ansibleRunner.playbook(List.of(host), "init.yml", vars, out, INIT_TIMEOUT_SECONDS);
+            int code = sshRunner.run(host, command, SshRunner.Input.of(script), out, INIT_TIMEOUT_SECONDS);
             if (code == 0) {
                 var done = new OpsHost();
                 done.setId(host.getId());
@@ -203,7 +215,7 @@ public class OpsHostService {
         return probe == null || probe.info() == null || probe.info().getCpuCores() <= 0 ? 1 : probe.info().getCpuCores();
     }
 
-    /** 缓存过期的主机重新读取，多台主机一次 Ansible 并行执行 */
+    /** 缓存过期的主机重新读取，多台主机并行执行 */
     private void refresh(List<OpsHost> hosts) {
         long now = System.currentTimeMillis();
         List<OpsHost> stale = hosts.stream().filter(host -> {
@@ -213,21 +225,22 @@ public class OpsHostService {
         if (stale.isEmpty()) {
             return;
         }
-        Map<Long, AnsibleRunner.ShellResult> results;
+        Map<Long, SshRunner.Result> results;
         try {
-            results = ansibleRunner.shell(stale, PROBE_SCRIPT, PROBE_TIMEOUT_SECONDS);
+            results = sshRunner.execAll(stale, host -> "sh -s", SshRunner.Input.of(PROBE_SCRIPT.getBytes(StandardCharsets.UTF_8)),
+                    PROBE_TIMEOUT_SECONDS);
         } catch (BusinessException exception) {
             stale.forEach(host -> probes.put(host.getId(), new Probe(now, false, null, 0, exception.getMessage())));
             return;
         }
         for (OpsHost host : stale) {
-            AnsibleRunner.ShellResult result = results.get(host.getId());
+            SshRunner.Result result = results.get(host.getId());
             if (result == null) {
                 probes.put(host.getId(), new Probe(now, false, null, 0, "没有返回结果"));
             } else if (!result.reachable()) {
-                probes.put(host.getId(), new Probe(now, false, null, 0, "SSH 连接失败：" + result.output()));
-            } else if (result.rc() != 0) {
-                probes.put(host.getId(), new Probe(now, true, null, 0, "读取主机信息失败：" + result.output()));
+                probes.put(host.getId(), new Probe(now, false, null, 0, "SSH 连接失败：" + result.output().strip()));
+            } else if (result.exitCode() != 0) {
+                probes.put(host.getId(), new Probe(now, true, null, 0, "读取主机信息失败：" + result.output().strip()));
             } else {
                 Map<String, String> values = new HashMap<>();
                 List<String> diskLines = new ArrayList<>();
