@@ -44,9 +44,8 @@ import static com.oaixdog.adminbackground.service.SshRunner.quote;
 /**
  * 程序：保存在 ops_app，每条绑定一台主机和它上面的一个目录（自己配置，例如 /usr/local/games/game1）。
  * <p>
- * 登记时把 ops-scripts/app.sh 拷到 &lt;目录&gt;/bin/app.sh，每次发布前再覆盖成最新版本。app.sh 从自己所在位置推导程序目录，
- * 按 lib、conf、excel 的格式启停、发布、回滚，所有操作都是通过 SSH 执行 bash &lt;目录&gt;/bin/app.sh &lt;命令&gt;；
- * 在服务器上手动执行 bin/app.sh 效果一样。启停、发布、回滚、保存配置在后台执行（{@link OpsTaskService}），立即返回任务 id；
+ * 程序包和程序目录的格式都是 bin、lib、conf、excel，bin/app.sh 随包发布。所有操作都是通过 SSH 执行 bash &lt;目录&gt;/bin/app.sh &lt;命令&gt;，
+ * 在服务器上手动执行效果一样；发布时由新包里的 bin/app.sh 把自己发布到程序目录。启停、发布、回滚、保存配置在后台执行（{@link OpsTaskService}），立即返回任务 id；
  * 状态、日志、配置文件的读取直接执行。
  * <p>
  * 查看列表、日志需要 ops_app；新建、编辑、删除需要 ops_app:manage；启停 ops_app:control；发布、回滚 ops_app:deploy；
@@ -63,7 +62,6 @@ public class OpsAppService {
     /** conf 下的相对路径 */
     private static final Pattern CONF_FILE = Pattern.compile("[A-Za-z0-9_.\\-]+(/[A-Za-z0-9_.\\-]+)*");
     private static final Pattern BACKUP_NAME = Pattern.compile("\\d{8}-\\d{6}");
-    private static final String APP_SCRIPT = "app.sh";
     private static final int DIR_MAX_LENGTH = 256;
     private static final int REMARK_MAX_LENGTH = 128;
     private static final Set<String> ACTIONS = Set.of("start", "stop", "restart");
@@ -149,7 +147,7 @@ public class OpsAppService {
         return Map.of("list", list);
     }
 
-    /** 先把 app.sh 拷到 &lt;目录&gt;/bin/（目录不存在时创建），成功后再保存登记 */
+    /** 只保存登记，不连接服务器；目录在第一次发布时创建 */
     public OpsAppResponse create(String authorization, String name, Long hostId, String dir, String remark) {
         permissionService.requireMenu(authorization, MENU + ":manage");
         var app = new OpsApp();
@@ -159,7 +157,6 @@ public class OpsAppService {
         app.setCreatedAt(now);
         app.setUpdatedAt(now);
         requireUnique(app);
-        installScript(host, app.getDir());
         try {
             opsAppMapper.insert(app);
         } catch (DuplicateKeyException exception) {
@@ -168,7 +165,7 @@ public class OpsAppService {
         return OpsAppResponse.valueOf(app, host);
     }
 
-    /** 修改主机、目录时程序必须已停止，并把 app.sh 拷到新目录；旧目录不动 */
+    /** 修改主机、目录时程序必须已停止；服务器上的目录不动 */
     public OpsAppResponse update(String authorization, Long appId, String name, Long hostId, String dir, String remark) {
         permissionService.requireMenu(authorization, MENU + ":manage");
         OpsApp app = requireApp(appId);
@@ -181,9 +178,6 @@ public class OpsAppService {
         }
         app.setUpdatedAt(System.currentTimeMillis());
         requireUnique(app);
-        if (moved) {
-            installScript(host, app.getDir());
-        }
         try {
             opsAppMapper.updateById(app);
         } catch (DuplicateKeyException exception) {
@@ -226,17 +220,20 @@ public class OpsAppService {
             throw new BusinessException(ErrorCode.OPS_UPLOAD_NOT_FOUND);
         }
         uploads.remove(uploadId);
-        String remoteZip = "/tmp/app-deploy-" + uploadId + ".zip";
-        String args = quote(remoteZip) + " --keep " + properties.getOpsBackupKeep() + (Boolean.TRUE.equals(overwriteConf) ? " --overwrite-conf" : "");
+        String remoteZip = quote("/tmp/app-deploy-" + uploadId + ".zip");
+        String remoteTmp = quote("/tmp/app-deploy-" + uploadId);
+        // 解压到临时目录，执行新包里的 bin/app.sh deploy <程序目录>（zip 里外面可以再包一层目录）
+        String command = "rm -rf " + remoteTmp + " && mkdir -p " + remoteTmp + " && unzip -q " + remoteZip + " -d " + remoteTmp
+                + " && s=$(ls " + remoteTmp + "/bin/app.sh " + remoteTmp + "/*/bin/app.sh 2>/dev/null | head -1)"
+                + " && if [ -z \"$s\" ]; then echo '程序包里没有 bin/app.sh'; false; else bash \"$s\" deploy " + quote(app.getDir())
+                + " --keep " + properties.getOpsBackupKeep() + (Boolean.TRUE.equals(overwriteConf) ? " --overwrite-conf" : "") + "; fi"
+                + "; rc=$?; rm -rf " + remoteTmp + " " + remoteZip + "; exit $rc";
         try {
             return opsTaskService.submit(account, "deploy", "发布 " + app.getName() + "（" + host.getIp() + "）", host.getId(), app.getId(),
                     lock(app), out -> {
                         try {
-                            out.accept("== 更新 bin/app.sh");
-                            installScript(host, app.getDir());
                             out.accept("== 上传程序包，" + upload.size + " 字节");
-                            sshRunner.exec(host, "cat > " + quote(remoteZip), SshRunner.Input.of(upload.file), DEPLOY_TIMEOUT_SECONDS);
-                            String command = "bash " + script(app) + " deploy " + args + "; rc=$?; rm -f " + quote(remoteZip) + "; exit $rc";
+                            sshRunner.exec(host, "cat > " + remoteZip, SshRunner.Input.of(upload.file), DEPLOY_TIMEOUT_SECONDS);
                             boolean success = sshRunner.run(host, command, null, out, DEPLOY_TIMEOUT_SECONDS) == 0;
                             if (success) {
                                 var deployed = new OpsApp();
@@ -424,7 +421,7 @@ public class OpsAppService {
         for (OpsApp app : apps) {
             command.append("echo @app=").append(app.getId()).append("; ")
                     .append("if [ -f ").append(script(app)).append(" ]; then bash ").append(script(app)).append(" status; ")
-                    .append("else echo script=0; fi; ");
+                    .append("else echo deployed=0; fi; ");
         }
         String output = sshRunner.exec(host, command.toString(), READ_TIMEOUT_SECONDS);
         Map<Long, Map<String, String>> values = new HashMap<>();
@@ -447,9 +444,7 @@ public class OpsAppService {
             state.setError("");
             state.setDeployed("1".equals(v.get("deployed")));
             state.setRunning("1".equals(v.get("running")));
-            if ("0".equals(v.get("script"))) {
-                state.setStatus(OpsAppState.NO_SCRIPT);
-            } else if (state.isRunning()) {
+            if (state.isRunning()) {
                 state.setStatus(OpsAppState.RUNNING);
             } else {
                 state.setStatus(state.isDeployed() ? OpsAppState.STOPPED : OpsAppState.NOT_DEPLOYED);
@@ -507,29 +502,15 @@ public class OpsAppService {
 
     /** 程序目录里的 bin/app.sh，已加引号 */
     private static String script(OpsApp app) {
-        return quote(app.getDir() + "/bin/" + APP_SCRIPT);
+        return quote(app.getDir() + "/bin/app.sh");
     }
 
     /** 执行 bin/app.sh 的一个子命令（args 已加引号），输出交给 out，返回是否成功 */
     private boolean runScript(OpsHost host, OpsApp app, String args, SshRunner.Input input, Consumer<String> out,
                               long timeoutSeconds) {
-        return sshRunner.run(host, "bash " + script(app) + " " + args, input, out, timeoutSeconds) == 0;
-    }
-
-    /** 把最新的 ops-scripts/app.sh 拷到 &lt;dir&gt;/bin/app.sh：先写临时文件再替换，正在执行的旧脚本不受影响 */
-    private void installScript(OpsHost host, String dir) {
-        byte[] content;
-        Path file = Path.of(properties.getOpsScriptDir(), APP_SCRIPT);
-        try {
-            content = Files.readAllBytes(file);
-        } catch (IOException e) {
-            throw new BusinessException(ErrorCode.OPS_SSH_FAILED, "读取 " + file.toAbsolutePath() + " 失败：" + e.getMessage());
-        }
-        String bin = quote(dir + "/bin");
-        String target = quote(dir + "/bin/" + APP_SCRIPT);
-        String temp = quote(dir + "/bin/." + APP_SCRIPT + ".new");
-        sshRunner.exec(host, "mkdir -p " + bin + " && cat > " + temp + " && chmod 755 " + temp + " && mv -f " + temp + " " + target,
-                SshRunner.Input.of(content), READ_TIMEOUT_SECONDS);
+        String command = "if [ ! -f " + script(app) + " ]; then echo " + quote("还没有发布：" + app.getDir() + "/bin/app.sh 不存在")
+                + "; exit 1; fi; bash " + script(app) + " " + args;
+        return sshRunner.run(host, command, input, out, timeoutSeconds) == 0;
     }
 
     /** 有任务在执行时不能修改、删除登记 */

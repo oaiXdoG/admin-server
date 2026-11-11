@@ -67,13 +67,6 @@ public class ApplicationProperties {
     @Value("${ops.script.dir:ops-scripts}")
     private String opsScriptDir;
 
-    /** 运维中心：登录服务器的账号和私钥，所有主机共用 */
-    @Value("${ops.ssh.user:root}")
-    private String opsSshUser;
-
-    @Value("${ops.ssh.key:/root/.ssh/id_ed25519}")
-    private String opsSshKey;
-
     /** 运维中心：上传的程序包暂存目录 */
     @Value("${ops.upload.dir:ops-upload}")
     private String opsUploadDir;

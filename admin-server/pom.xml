@@ -84,10 +84,10 @@
 
     <!--
         mvn package 后 target/admin-server 下的产物（与 host、log 相同的统一格式）：
-        bin/                 统一的启停脚本，源文件在 danmu 根目录的 ops/bin；后台在服务器上手动执行 bin/start.sh、bin/stop.sh 启停
+        bin/app.sh           启停（在服务器上执行 bin/app.sh start|stop|restart|status），源文件在项目的 bin/
         conf/                配置文件（含 jvm.options）
         db/                  schema.sql 和 migration/ 升级脚本（部署时执行）
-        ops-scripts/         运维中心的 app.sh（拷到每个程序的 bin/）和 host_init.sh
+        ops-scripts/         运维中心初始化主机用的 host_init.sh
         lib/admin-server.jar 程序 jar，MANIFEST 带 Main-Class
         lib/extra/           依赖 jar
     -->
@@ -185,7 +185,7 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <!-- 统一的启停脚本，源文件在 danmu 根目录的 ops/bin -->
+                        <!-- bin/app.sh：启停、发布、回滚，和 conf 一样随包发布 -->
                         <id>copy-bin</id>
                         <phase>package</phase>
                         <goals>
@@ -195,7 +195,7 @@
                             <outputDirectory>${dist.directory}/bin</outputDirectory>
                             <resources>
                                 <resource>
-                                    <directory>${project.basedir}/../../../ops/bin</directory>
+                                    <directory>bin</directory>
                                 </resource>
                             </resources>
                         </configuration>

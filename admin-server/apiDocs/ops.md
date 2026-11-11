@@ -4,12 +4,12 @@
 
 - **主机**：在后台手动添加（IP、SSH 端口），保存在 `ops_host`。添加后点「初始化」安装程序运行需要的 JDK 21、unzip。
 - **程序**：保存在 `ops_app`，每条绑定一台主机和它上面的一个目录（绝对路径，自己配置，例如 `/usr/local/games/game1`）。同一台主机上名称、目录都不能重复。
-  - 登记时把 `ops-scripts/app.sh` 拷到 `<目录>/bin/app.sh`，每次发布前再覆盖成最新版本。所有程序共用这一份脚本，它从自己所在位置推导程序目录，不需要参数或配置。
+  - 每个项目都有自己的 `bin/app.sh`（内容相同），和 `conf` 一样随 `mvn package` 打进程序包、随发布进入程序目录。它从自己所在位置推导程序目录，不需要参数或配置。
   - 启停、发布、回滚、日志、配置文件都是通过 SSH 执行 `bash <目录>/bin/app.sh <命令>`；在服务器上手动执行 `<目录>/bin/app.sh start|stop|restart|status` 效果一样。没有 systemd，也没有自动拉起。
 - **后台执行**：初始化、启停、发布、回滚、保存配置都在后台执行，接口立即返回 `taskId`，发起操作的页面用 `/ops/task/get` 读实时输出。同一个程序同一时间只能有一个。谁做了什么、成功还是失败，在结束时写入操作日志，没有单独的历史页。
 - **监控**：主机「初始化」时装上 node_exporter、process-exporter，由 Prometheus 拉取；「主机监控」页嵌入 Grafana 的面板（经 nginx 以同源的 `/grafana/` 访问）。管理后台只负责把主机列表写给 Prometheus（`ops.prometheus.targets-dir`）和提供下拉选项。
 
-`app.sh`、`host_init.sh` 在 admin-server 的 `ops-scripts/` 目录，随程序一起打包。
+初始化主机用的 `host_init.sh` 在 admin-server 的 `ops-scripts/` 目录，随程序一起打包。管理后台自己也用 `bin/app.sh` 启停。
 
 ## 程序目录的格式
 
@@ -17,13 +17,13 @@
 
 | 路径 | 说明 |
 | --- | --- |
-| `bin/app.sh` | 管理后台拷进来的管理脚本 |
+| `bin/app.sh` | 管理脚本，随程序包发布 |
 | `lib/` | jar，其中恰好一个 jar 的 MANIFEST 带 `Main-Class`；`lib/extra/` 也在 classpath 上 |
 | `conf/` | 配置文件，放在 classpath 最前面；`conf/jvm.options` 为 JVM 参数（每行一个，`#` 开头和空行忽略，可以没有） |
 | `excel/` | 可选 |
 | `logs/` | 程序自己写的日志；`console.log` 为最近一次启动的控制台输出（JVM 起不来时看这里） |
 | `app.pid` | 运行中的进程号 |
-| `backup/<时间>/` | 发布、回滚前的 `lib`、`conf`、`excel` |
+| `backup/<时间>/` | 发布、回滚前的 `bin`、`lib`、`conf`、`excel` |
 | `backup-conf/<时间>/` | 在线修改配置前的旧文件 |
 
 启动命令：`cd <目录> && java <jvm.options> -Dhost.app.dir=<目录> -cp conf:lib/*:lib/extra/* <Main-Class>`，在后台运行（`setsid`），3 秒后进程还在才算启动成功。`java` 取 `$JAVA_HOME/bin/java`，没有设置时用 PATH 里的。`-Dhost.app.dir` 用来确认 `app.pid` 里的进程确实是这个程序，process-exporter 也按它区分进程。停止先发 SIGTERM，30 秒内没退出就 `kill -9`。
@@ -33,7 +33,7 @@
 | `start`、`stop`、`restart` | 启停；已在运行时 start 直接返回 |
 | `status` | 每行 `key=value`：`deployed`、`running`，运行中时还有 `pid`、`elapsed`（秒）、`rss`（KB）、`cpu_ms` |
 | `log [文件] [行数]` | `logs/` 下 `server.log`、`error.log`、`console.log` 的最后几行 |
-| `deploy <zip> [--overwrite-conf] [--keep 份数]` | 发布，见下文 |
+| `deploy <程序目录> [--overwrite-conf] [--keep 份数]` | 在解压出来的新包里执行，把这个包发布到程序目录，见下文 |
 | `backups`、`rollback <备份名>` | 回滚，见下文 |
 | `conf-list`、`conf-get <文件>`、`conf-put <文件>` | 列出、读取、保存 `conf/` 下的文件（conf-put 从标准输入读内容） |
 
@@ -43,14 +43,13 @@
 
 | 配置 | 说明 |
 | --- | --- |
-| `ops.ssh.user`、`ops.ssh.key` | 登录服务器的账号（默认 root）和私钥，所有主机共用。公钥要加到每台服务器的 `/root/.ssh/authorized_keys` |
-| `ops.script.dir` | `app.sh`、`host_init.sh` 所在目录，默认工作目录下的 `ops-scripts` |
+| `ops.script.dir` | `host_init.sh` 所在目录，默认工作目录下的 `ops-scripts` |
 | `ops.upload.dir` | 上传的程序包暂存目录 |
 | `ops.backup.keep` | 发布时程序目录 `backup/` 下保留的旧版本数 |
 | `ops.prometheus.targets-dir` | 写给 Prometheus 的主机列表目录（file_sd 的 `node.json`、`process.json`），启动时和主机增删改后重写；为空时不写 |
 | `ops.exporter.node-port`、`ops.exporter.process-port` | 业务服务器上 node_exporter、process-exporter 的端口（默认 9100、9256）：「初始化」按它配置，写给 Prometheus 的主机列表按它生成 |
 
-管理后台所在机器需要有 OpenSSH 客户端（`ssh` 命令）。第一次连接一台主机时自动记住它的指纹（`StrictHostKeyChecking=accept-new`），连接超时 10 秒。
+执行的是 `ssh -p <端口> root@<IP>`，和在管理机上手动执行一样：用运行管理后台的用户的默认私钥（`~/.ssh/`）和 `~/.ssh/config`，公钥要加到每台服务器的 `/root/.ssh/authorized_keys`。第一次连接一台主机时自动记住它的指纹（`StrictHostKeyChecking=accept-new`），连接超时 10 秒。
 
 ## 权限
 
@@ -147,7 +146,7 @@
 
 | `state` 字段 | 说明 |
 | --- | --- |
-| `status` | `running`（运行中）、`stopped`（已停止）、`not-deployed`（`lib` 下还没有 jar）、`no-script`（目录里没有 `bin/app.sh`，发布时会拷过去） |
+| `status` | `running`（运行中）、`stopped`（已停止）、`not-deployed`（还没有发布：没有 `bin/app.sh` 或 `lib` 下没有 jar） |
 | `deployed` | `lib` 下有 jar |
 | `running`、`pid` | 是否运行中、进程号 |
 | `startTime` | 启动时间，毫秒 |
@@ -165,7 +164,7 @@
 - `dir`：绝对路径，只能包含字母、数字、`_ . - /`，最长 256；同一台主机上不能重复
 - `remark`：最长 128
 
-新建时先把 `app.sh` 拷到 `<目录>/bin/`（目录不存在时创建），连不上主机就不保存。修改主机、目录时程序必须已停止，会把 `app.sh` 拷到新目录，旧目录不动。有操作正在执行时不能修改。
+只保存登记，不连接服务器，目录在第一次发布时创建。修改主机、目录时程序必须已停止，服务器上的目录不动。有操作正在执行时不能修改。
 
 ### `POST /ops/app/remove`
 
@@ -206,20 +205,20 @@
 
 ## 发布和回滚
 
-需要 `ops_app:deploy`。程序包是 `lib`、`conf`、`excel` 打成的 zip，外面可以再包一层目录；包里有 `bin` 也不使用。
+需要 `ops_app:deploy`。程序包是 `mvn package` 产物（`bin`、`lib`、`conf`、`excel`）打成的 zip，必须带 `bin/app.sh`，外面可以再包一层目录。
 
 1. `POST /ops/app/upload/start`，`{"appId":1}`，返回 `{uploadId}`。
 2. `POST /ops/app/upload/chunk`，`{"appId":1,"uploadId":"...","index":0,"data":"base64"}`。`index` 从 0 开始按顺序发送；前端每片 2MB，一片不能超过 4MB（HTTP 请求体上限 16MB）。重发上一片（应答丢失时）会被忽略。程序包先存在管理后台本机的 `ops.upload.dir`，最大 1GB，1 小时没有新分片的被删除。
 3. `POST /ops/app/deploy`，`{"appId":1,"uploadId":"...","overwriteConf":false}`，返回 `{taskId}`：
-   - 把最新的 `app.sh` 拷到 `<目录>/bin/`，程序包传到服务器的 `/tmp`，然后执行 `app.sh deploy <zip> --keep <ops.backup.keep> [--overwrite-conf]`，结束后删除 zip。
-   - 解压，确认包里有 `lib`、恰好一个 Main-Class；不对就直接失败，不停止正在运行的程序。
-   - 在运行的先停止。备份机器上的 `lib`、`conf`、`excel` 到 `backup/<时间>`，只保留 `ops.backup.keep` 份：要替换的目录移进备份，不替换的复制一份。替换中途失败时恢复原来的版本。
+   - 程序包传到服务器的 `/tmp` 并解压，执行**新包里的** `bin/app.sh deploy <程序目录> --keep <ops.backup.keep> [--overwrite-conf]`，结束后删除临时文件。
+   - 确认新包里恰好一个 Main-Class；不对就直接失败，不停止正在运行的程序。
+   - 在运行的先停止。备份机器上的 `bin`、`lib`、`conf`、`excel` 到 `backup/<时间>`，只保留 `ops.backup.keep` 份：要替换的目录移进备份，不替换的复制一份。替换中途失败时恢复原来的版本。
    - 只替换包里有的目录。`conf` 默认不替换；目录里没有 conf，或 `overwriteConf` 为 true 时使用包里的。
    - 原来在运行的重新启动。
 
 回滚：
 - `POST /ops/app/backups`，`{"appId":1}`，返回 `{list}`：`backup/` 下的版本名（`yyyyMMdd-HHmmss`），新的在前。
-- `POST /ops/app/rollback`，`{"appId":1,"backup":"20261106-074714"}`，返回 `{taskId}`。执行 `app.sh rollback <备份名>`：备份里有的 `lib`、`conf`、`excel` 换回去（conf 也换回发布那一刻的版本）；当前这些目录先移入 `backup/<现在时间>`，所以回滚本身也能再回滚。原来在运行的回滚后重新启动。
+- `POST /ops/app/rollback`，`{"appId":1,"backup":"20261106-074714"}`，返回 `{taskId}`。执行 `app.sh rollback <备份名>`：备份里有的 `bin`、`lib`、`conf`、`excel` 换回去（conf 也换回发布那一刻的版本）；当前这些目录先移入 `backup/<现在时间>`，所以回滚本身也能再回滚。原来在运行的回滚后重新启动。
 
 ## 主机监控
 

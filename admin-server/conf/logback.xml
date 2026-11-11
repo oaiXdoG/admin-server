@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-    STDOUT：IDEA、docker logs 里看；服务器上用 bin/start.sh 启动时控制台输出全部丢弃（> /dev/null 2>&1）
+    STDOUT：IDEA、docker logs 里看；服务器上用 bin/app.sh start 启动时控制台输出写到 logs/console.log
     logs/server.log：全部日志；logs/error.log：只有 ERROR。都按天切分（单个文件超过 100MB 再按序号切），保留 30 天
-    logs 相对于工作目录：bin/start.sh 的工作目录是程序目录
+    logs 相对于工作目录：bin/app.sh 的工作目录是程序目录
 -->
 <configuration>
     <property name="LOG_DIR" value="logs"/>

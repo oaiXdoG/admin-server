@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
- * 主机：在后台手动添加（IP、SSH 端口），管理后台以 ops.ssh.user 通过 SSH 管理。
+ * 主机：在后台手动添加（IP、SSH 端口），管理后台以 root 通过 SSH 管理。
  * 「初始化」执行 ops-scripts/host_init.sh，安装程序运行需要的 JDK、unzip 和监控用的 node_exporter、process-exporter
  * （主机列表由 {@link OpsPrometheusTargets} 写给 Prometheus）；主机列表通过 SSH 读取实时信息（每台主机一次 SSH，结果缓存 10 秒）。
  * <p>

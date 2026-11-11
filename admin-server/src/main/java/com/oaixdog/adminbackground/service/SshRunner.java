@@ -1,6 +1,5 @@
 package com.oaixdog.adminbackground.service;
 
-import com.oaixdog.adminbackground.config.ApplicationProperties;
 import com.oaixdog.adminbackground.entity.OpsHost;
 import com.oaixdog.adminbackground.exception.BusinessException;
 import com.oaixdog.adminbackground.exception.ErrorCode;
@@ -29,7 +28,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
- * 通过 SSH 在主机上执行命令：调用管理后台所在机器的 ssh 命令，以 ops.ssh.user + ops.ssh.key 登录 ip:sshPort。
+ * 通过 SSH 在主机上执行命令：调用管理后台所在机器的 ssh 命令，ssh -p &lt;sshPort&gt; root@&lt;ip&gt;，和在这台机器上手动执行一样，
+ * 用运行管理后台的用户的 ~/.ssh 默认私钥和 ~/.ssh/config。
  * 命令原样交给远程的 shell 执行，参数用 {@link #quote} 括起来；需要时从标准输入送数据（脚本、配置文件内容、程序包）。
  * 第一次连接时自动记住主机指纹（StrictHostKeyChecking=accept-new）。
  */
@@ -42,8 +42,6 @@ public class SshRunner {
     /** ssh 自己出错（连不上、认证失败）时的退出码 */
     private static final int SSH_ERROR = 255;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
-
-    private final ApplicationProperties properties;
 
     /** reachable 为 false 时 output 为连接失败的原因 */
     public record Result(boolean reachable, int exitCode, String output) {
@@ -113,14 +111,13 @@ public class SshRunner {
     private Result execute(OpsHost host, String command, Input input, Consumer<String> lineOut, long timeoutSeconds) {
         List<String> args = new ArrayList<>(List.of("ssh",
                 "-p", String.valueOf(host.getSshPort() == null ? 22 : host.getSshPort()),
-                "-i", properties.getOpsSshKey(),
                 "-o", "BatchMode=yes",
                 "-o", "ConnectTimeout=" + CONNECT_TIMEOUT_SECONDS,
                 "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "ServerAliveInterval=15",
                 "-o", "ServerAliveCountMax=4",
                 "-o", "LogLevel=ERROR",
-                properties.getOpsSshUser() + "@" + host.getIp(),
+                "root@" + host.getIp(),
                 command));
         Process process;
         try {

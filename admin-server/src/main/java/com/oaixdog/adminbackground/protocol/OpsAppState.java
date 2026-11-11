@@ -5,7 +5,7 @@ import lombok.Setter;
 
 /**
  * 程序的运行状态：通过 SSH 执行程序目录里的 bin/app.sh status 读取。
- * status：running（运行中）、stopped（已停止）、not-deployed（lib 下还没有 jar）、no-script（bin/app.sh 不存在，重新保存登记或发布会拷过去）。
+ * status：running（运行中）、stopped（已停止）、not-deployed（还没有发布：bin/app.sh 或 lib 下的 jar 不存在）。
  */
 @Getter
 @Setter
@@ -14,7 +14,6 @@ public class OpsAppState {
     public static final String RUNNING = "running";
     public static final String STOPPED = "stopped";
     public static final String NOT_DEPLOYED = "not-deployed";
-    public static final String NO_SCRIPT = "no-script";
 
     private String dir;
     private String error;
