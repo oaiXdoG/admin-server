@@ -13,7 +13,7 @@
 #   backup-conf/<时间>/     在线修改配置前的旧文件
 #
 # 启动命令：cd <程序目录> && java <jvm.options> -Dhost.app.dir=<程序目录> -cp conf:lib/*:lib/extra/* <Main-Class>
-# -Dhost.app.dir 用来确认 app.pid 里的进程确实是这个程序；监控（process-exporter）也按它区分进程。
+# -Dhost.app.dir 用来确认 app.pid 里的进程确实是这个程序。
 #
 # 用法：bin/app.sh <命令> [参数]
 #   start | stop | restart | status
@@ -88,7 +88,7 @@ cmd_start() {
     return 0
   fi
   ls lib/*.jar >/dev/null 2>&1 || fail "还没有发布：$APP_DIR/lib 下没有 jar"
-  command -v "$JAVA" >/dev/null 2>&1 || fail "找不到 java（$JAVA），先初始化主机安装 JDK，或者设置 JAVA_HOME"
+  command -v "$JAVA" >/dev/null 2>&1 || fail "找不到 java（$JAVA）：主机上还没有安装 java，请先安装，或者设置 JAVA_HOME"
   main="$(main_class "$APP_DIR")"
   local cmd=("$JAVA")
   if [ -f conf/jvm.options ]; then
@@ -138,9 +138,9 @@ cmd_stop() {
   echo "已停止"
 }
 
-# 每行 key=value：deployed、running；运行中时还有 pid、elapsed（秒）、rss（KB）、cpu_ms（累计 CPU 时间）
+# 每行 key=value：deployed、running；运行中时还有 pid、elapsed（秒）
 cmd_status() {
-  local pid ticks
+  local pid
   if ls lib/*.jar >/dev/null 2>&1; then echo "deployed=1"; else echo "deployed=0"; fi
   if ! pid="$(running_pid)"; then
     echo "running=0"
@@ -149,12 +149,6 @@ cmd_status() {
   echo "running=1"
   echo "pid=$pid"
   echo "elapsed=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')"
-  echo "rss=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')"
-  if [ -r "/proc/$pid/stat" ]; then
-    ticks="$(getconf CLK_TCK 2>/dev/null || echo 100)"
-    # 去掉「pid (进程名) 」后第 12、13 列为 utime、stime
-    sed 's/^.*) //' "/proc/$pid/stat" | awk -v t="$ticks" '{printf "cpu_ms=%d\n", ($12 + $13) * 1000 / t}'
-  fi
 }
 
 # ---------------------------------------------------------------- 日志

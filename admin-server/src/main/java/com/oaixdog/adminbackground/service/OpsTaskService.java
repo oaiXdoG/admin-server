@@ -23,12 +23,12 @@ import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 
 /**
- * 初始化主机、启停、发布、回滚、保存配置都在后台线程里通过 SSH 执行，请求立即返回任务 id。
+ * 启停、发布都在后台线程里通过 SSH 执行，请求立即返回任务 id。
  * 执行中的输出在内存里，发起操作的页面按 offset 增量读取；结束后输出写入 ops_task。
- * 谁做了什么、成功还是失败，在任务结束时写入操作日志。同一个程序（或主机初始化）同一时间只能有一个任务。
+ * 谁做了什么、成功还是失败，在任务结束时写入操作日志。同一个程序同一时间只能有一个任务。
  * 管理后台重启时，还在执行中的任务记为失败。
  * <p>
- * 查看输出需要 ops_app 或 ops_host（程序页、主机页里看这次操作的输出）。
+ * 查看输出需要 ops_app。
  */
 @Service
 @RequiredArgsConstructor
@@ -37,7 +37,6 @@ public class OpsTaskService implements InitializingBean {
     private static final Logger log = LoggerFactory.getLogger(OpsTaskService.class);
 
     private static final String APP_MENU = "ops_app";
-    private static final String HOST_MENU = "ops_host";
     /** 输出最多保留这么多字符，超过时丢掉前面的 */
     private static final int OUTPUT_MAX_CHARS = 200_000;
 
@@ -94,7 +93,7 @@ public class OpsTaskService implements InitializingBean {
         failed.setFinishedAt(System.currentTimeMillis());
         opsTaskMapper.update(failed, Wrappers.<OpsTask>lambdaUpdate().eq(OpsTask::getStatus, OpsTask.RUNNING));
         for (OpsTask task : interrupted) {
-            record(null, task.getAccount(), task.getType(), task.getTitle(), task.getHostId(), task.getAppId(), false);
+            record(null, task.getAccount(), task.getType(), task.getTitle(), task.getAppId(), false);
         }
         log.warn("管理后台重启前有 {} 个操作没有执行完，已记为失败", interrupted.size());
     }
@@ -102,16 +101,15 @@ public class OpsTaskService implements InitializingBean {
     /**
      * 提交任务并立即返回任务 id。
      *
-     * @param lock 互斥的对象，例如 app:3、host:2；同一个 lock 已有任务在执行时抛出 OPS_TASK_BUSY
+     * @param lock 互斥的对象，例如 app:3；同一个 lock 已有任务在执行时抛出 OPS_TASK_BUSY
      */
-    public long submit(Account account, String type, String title, long hostId, long appId, String lock, Work work) {
+    public long submit(Account account, String type, String title, long appId, String lock, Work work) {
         if (!busy.add(lock)) {
             throw new BusinessException(ErrorCode.OPS_TASK_BUSY);
         }
         var task = new OpsTask();
         task.setType(type);
         task.setTitle(title.length() > 256 ? title.substring(0, 256) : title);
-        task.setHostId(hostId);
         task.setAppId(appId);
         task.setAccount(account == null ? "" : account.getAccount());
         task.setStatus(OpsTask.RUNNING);
@@ -145,7 +143,7 @@ public class OpsTaskService implements InitializingBean {
                 opsTaskMapper.updateById(finished);
                 running.remove(id);
                 busy.remove(lock);
-                record(account, account == null ? "" : account.getAccount(), type, title, hostId, appId, success);
+                record(account, account == null ? "" : account.getAccount(), type, title, appId, success);
                 log.info("操作结束，id={}，{}，结果={}", id, title, finished.getStatus());
             }
         });
@@ -153,12 +151,9 @@ public class OpsTaskService implements InitializingBean {
     }
 
     /** 操作日志里的结果。title 放进参数，操作列用固定名称，方便按「发布」「回滚」筛选 */
-    private void record(Account account, String accountName, String type, String title, long hostId, long appId, boolean success) {
+    private void record(Account account, String accountName, String type, String title, long appId, boolean success) {
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("title", title);
-        if (hostId > 0) {
-            params.put("hostId", hostId);
-        }
         if (appId > 0) {
             params.put("appId", appId);
         }
@@ -168,10 +163,7 @@ public class OpsTaskService implements InitializingBean {
 
     private static String routeOf(String type) {
         return switch (type) {
-            case "init" -> "/ops/host/init";
-            case "config" -> "/ops/app/config/save";
             case "deploy" -> "/ops/app/deploy";
-            case "rollback" -> "/ops/app/rollback";
             case "start", "stop", "restart" -> "/ops/app/control";
             default -> "/ops/app/control";
         };
@@ -179,20 +171,17 @@ public class OpsTaskService implements InitializingBean {
 
     private static String actionOf(String type) {
         return switch (type) {
-            case "init" -> "初始化主机";
             case "start" -> "启动程序";
             case "stop" -> "停止程序";
             case "restart" -> "重启程序";
             case "deploy" -> "发布程序";
-            case "rollback" -> "回滚程序";
-            case "config" -> "修改程序配置文件";
             default -> "运维操作";
         };
     }
 
     /** 任务详情；output 为 offset 之后的输出，下次用返回的 offset 继续读 */
     public Map<String, Object> get(String authorization, Long taskId, Integer offset) {
-        permissionService.requireAnyMenu(authorization, APP_MENU, HOST_MENU);
+        permissionService.requireMenu(authorization, APP_MENU);
         OpsTask task = taskId == null ? null : opsTaskMapper.selectById(taskId);
         if (task == null) {
             throw new BusinessException(ErrorCode.OPS_TASK_NOT_FOUND);
@@ -211,7 +200,7 @@ public class OpsTaskService implements InitializingBean {
         return result;
     }
 
-    /** 程序或主机当前是否有任务在执行 */
+    /** 程序当前是否有任务在执行 */
     public boolean isBusy(String lock) {
         return busy.contains(lock);
     }
@@ -221,7 +210,6 @@ public class OpsTaskService implements InitializingBean {
         map.put("id", task.getId());
         map.put("type", task.getType());
         map.put("title", task.getTitle());
-        map.put("hostId", task.getHostId());
         map.put("appId", task.getAppId());
         map.put("account", task.getAccount());
         map.put("status", task.getStatus());

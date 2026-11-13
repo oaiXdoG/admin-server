@@ -1,20 +1,18 @@
 package com.oaixdog.adminbackground.protocol;
 
 import com.oaixdog.adminbackground.entity.OpsApp;
-import com.oaixdog.adminbackground.entity.OpsHost;
 import lombok.Getter;
 import lombok.Setter;
 
-/** 主机连不上或读取失败时 state 为 null，error 为失败原因；busy：有任务正在执行 */
+/** 机器连不上或读取失败时 state 为 null，error 为失败原因；busy：有任务正在执行 */
 @Getter
 @Setter
 public class OpsAppResponse {
 
     private long id;
     private String name;
-    private long hostId;
-    private String hostIp;
-    private String hostname;
+    private String ip;
+    private int sshPort;
     private boolean hostOnline;
     private String dir;
     private String remark;
@@ -25,13 +23,12 @@ public class OpsAppResponse {
     private OpsAppState state;
     private boolean busy;
 
-    public static OpsAppResponse valueOf(OpsApp app, OpsHost host) {
+    public static OpsAppResponse valueOf(OpsApp app) {
         OpsAppResponse response = new OpsAppResponse();
         response.id = app.getId();
         response.name = app.getName();
-        response.hostId = app.getHostId();
-        response.hostIp = host == null ? "" : host.getIp();
-        response.hostname = host == null ? "" : host.getHostname();
+        response.ip = app.getIp();
+        response.sshPort = app.getSshPort() == null ? 22 : app.getSshPort();
         response.dir = app.getDir();
         response.remark = app.getRemark();
         response.deployedAt = app.getDeployedAt();

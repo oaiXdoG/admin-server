@@ -24,8 +24,4 @@ public class OpsAppState {
     private long pid;
     /** 毫秒 */
     private long startTime;
-    /** 常驻内存，字节 */
-    private long memory;
-    /** 0～1，两次查询之间的平均值，第一次查询为 0 */
-    private double cpuUsage;
 }

@@ -23,8 +23,8 @@ import java.security.SecureRandom;
 /**
  * 启动初始化：
  * 1. 确保内置角色「超级管理员」存在；它拥有全部菜单，由权限判断直接放行，不写 role_menu。
- * 2. 系统里一个账号都没有时，按配置 admin.init.account / admin.init.password 创建初始超级管理员；
- *    密码未配置时随机生成并打印到日志，登录后应立即在「用户管理」里重置。
+ * 2. 系统里一个账号都没有时，按配置 admin.init.account 创建初始超级管理员，
+ *    密码随机生成并打印到日志，登录后应立即在「用户管理」里重置。
  */
 @Service
 @RequiredArgsConstructor
@@ -70,8 +70,7 @@ public class SystemInitializationService {
             return;
         }
         String account = StringUtils.isBlank(properties.getAdminInitAccount()) ? "admin" : properties.getAdminInitAccount().trim();
-        boolean generated = StringUtils.isBlank(properties.getAdminInitPassword());
-        String password = generated ? randomPassword() : properties.getAdminInitPassword();
+        String password = randomPassword();
         long now = System.currentTimeMillis();
         Account admin = new Account();
         admin.setAccount(account);
@@ -86,11 +85,7 @@ public class SystemInitializationService {
         accountRole.setAccountId(admin.getId());
         accountRole.setRoleId(superAdmin.getId());
         accountRoleMapper.insert(accountRole);
-        if (generated) {
-            log.warn("已创建初始超级管理员，账号: {}，随机密码: {}。请登录后立即在「用户管理」里重置密码。", account, password);
-        } else {
-            log.warn("已创建初始超级管理员，账号: {}，密码为配置 admin.init.password 的值。请登录后立即重置密码。", account);
-        }
+        log.warn("已创建初始超级管理员，账号: {}，随机密码: {}。请登录后立即在「用户管理」里重置密码。", account, password);
     }
 
     /** 16 位随机密码，前两位固定为一个字母和一个数字，保证符合密码规则 */

@@ -18,10 +18,9 @@ public class OpsTask {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    /** init、start、stop、restart、deploy、rollback、config */
+    /** start、stop、restart、deploy */
     private String type;
     private String title;
-    private Long hostId;
     private Long appId;
     private String account;
     private String status;

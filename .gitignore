@@ -6,4 +6,4 @@ target/
 .settings/
 .vscode/
 .DS_Store
-backups/
+upload/

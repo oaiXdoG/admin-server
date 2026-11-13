@@ -86,8 +86,7 @@
         mvn package 后 target/admin-server 下的产物（与 host、log 相同的统一格式）：
         bin/app.sh           启停（在服务器上执行 bin/app.sh start|stop|restart|status），源文件在项目的 bin/
         conf/                配置文件（含 jvm.options）
-        db/                  schema.sql 和 migration/ 升级脚本（部署时执行）
-        ops-scripts/         运维中心初始化主机用的 host_init.sh
+        db/                  schema.sql（建库时执行）
         lib/admin-server.jar 程序 jar，MANIFEST 带 Main-Class
         lib/extra/           依赖 jar
     -->
@@ -153,7 +152,7 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <!-- 数据库：新库执行 schema.sql，已有的库执行 migration/ 下的脚本（脚本都可以重复执行） -->
+                        <!-- 数据库：schema.sql，建库时执行 -->
                         <id>copy-db</id>
                         <phase>package</phase>
                         <goals>
@@ -164,22 +163,6 @@
                             <resources>
                                 <resource>
                                     <directory>src/main/resources/db</directory>
-                                </resource>
-                            </resources>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <!-- 运维中心的 app.sh、host_init.sh -->
-                        <id>copy-ops-scripts</id>
-                        <phase>package</phase>
-                        <goals>
-                            <goal>copy-resources</goal>
-                        </goals>
-                        <configuration>
-                            <outputDirectory>${dist.directory}/ops-scripts</outputDirectory>
-                            <resources>
-                                <resource>
-                                    <directory>ops-scripts</directory>
                                 </resource>
                             </resources>
                         </configuration>

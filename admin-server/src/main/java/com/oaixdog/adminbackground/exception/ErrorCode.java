@@ -94,9 +94,6 @@ public enum ErrorCode {
      */
     LOGIN_LOCKED(100049, "登录失败次数过多，请 15 分钟后再试"),
     PASSWORD_TOO_WEAK(100050, "密码至少 8 位，并且同时包含字母和数字"),
-    BACKUP_RUNNING(100051, "正在备份，请稍后再试"),
-    BACKUP_NOT_FOUND(100052, "备份文件不存在"),
-    BACKUP_TOO_LARGE(100053, "备份文件超过 50MB，请到服务器上直接复制"),
     DATA_SOURCE_NOT_FOUND(100054, "数据源不存在"),
     DATA_SOURCE_NAME_EXISTS(100055, "数据源名称已存在"),
     DATA_SOURCE_IN_USE(100056, "数据源正在被查询模板使用，不能删除"),
@@ -116,20 +113,16 @@ public enum ErrorCode {
     LOG_EVENT_INVALID(100065, "日志事件配置不合法"),
     LOG_QUERY_CONDITION_INVALID(100066, "日志查询条件不合法"),
     LOG_QUERY_FAILED(100067, "日志查询失败"),
-    OPS_HOST_NOT_FOUND(100068, "主机不存在"),
 
-    OPS_HOST_IN_USE(100071, "主机还有程序绑定，不能删除"),
     OPS_APP_NOT_FOUND(100072, "程序不存在"),
-    OPS_APP_DIR_EXISTS(100073, "这台主机上已有程序使用该目录"),
+    OPS_APP_DIR_EXISTS(100073, "这个 IP 上已有程序使用该目录"),
     OPS_APP_INVALID(100074, "程序配置不合法"),
-    OPS_APP_RUNNING(100075, "程序正在运行，请先停止"),
     OPS_SSH_FAILED(100076, "执行远程命令失败"),
-    OPS_HOST_EXISTS(100077, "该 IP 的主机已存在"),
-    OPS_HOST_INVALID(100078, "主机配置不合法"),
-    OPS_APP_NAME_EXISTS(100079, "这台主机上已有同名程序"),
+    OPS_APP_NAME_EXISTS(100079, "这个 IP 上已有同名程序"),
     OPS_TASK_BUSY(100080, "有任务正在执行，请等它结束"),
     OPS_TASK_NOT_FOUND(100081, "任务不存在"),
-    OPS_UPLOAD_NOT_FOUND(100082, "上传不存在或已过期，请重新上传");
+    OPS_UPLOAD_NOT_FOUND(100082, "上传不存在或已过期，请重新上传"),
+    OPS_APP_RUNNING(100084, "程序正在运行，请先关闭再删除");
 
     private final int code;
     private final String message;

@@ -1,6 +1,5 @@
 package com.oaixdog.adminbackground.service;
 
-import com.oaixdog.adminbackground.entity.OpsHost;
 import com.oaixdog.adminbackground.exception.BusinessException;
 import com.oaixdog.adminbackground.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -18,14 +17,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.function.Function;
 
 /**
  * 通过 SSH 在主机上执行命令：调用管理后台所在机器的 ssh 命令，ssh -p &lt;sshPort&gt; root@&lt;ip&gt;，和在这台机器上手动执行一样，
@@ -42,6 +36,10 @@ public class SshRunner {
     /** ssh 自己出错（连不上、认证失败）时的退出码 */
     private static final int SSH_ERROR = 255;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
+
+    /** 要登录的机器：ssh -p port root@ip */
+    public record Target(String ip, int port) {
+    }
 
     /** reachable 为 false 时 output 为连接失败的原因 */
     public record Result(boolean reachable, int exitCode, String output) {
@@ -64,12 +62,12 @@ public class SshRunner {
     }
 
     /** 执行命令，输出（含 stderr）逐行交给 out，返回退出码；连不上时为 255 */
-    public int run(OpsHost host, String command, Input input, Consumer<String> out, long timeoutSeconds) {
+    public int run(Target host, String command, Input input, Consumer<String> out, long timeoutSeconds) {
         return execute(host, command, input, out, timeoutSeconds).exitCode();
     }
 
     /** 执行命令并返回完整输出；连不上或退出码不为 0 时抛出 OPS_SSH_FAILED，message 为输出 */
-    public String exec(OpsHost host, String command, Input input, long timeoutSeconds) {
+    public String exec(Target host, String command, Input input, long timeoutSeconds) {
         Result result = execute(host, command, input, null, timeoutSeconds);
         if (!result.ok()) {
             String output = result.output().strip();
@@ -78,28 +76,8 @@ public class SshRunner {
         return result.output();
     }
 
-    public String exec(OpsHost host, String command, long timeoutSeconds) {
+    public String exec(Target host, String command, long timeoutSeconds) {
         return exec(host, command, null, timeoutSeconds);
-    }
-
-    /** 在多台主机上并行执行，返回 主机 id → 结果 */
-    public Map<Long, Result> execAll(List<OpsHost> hosts, Function<OpsHost, String> command, Input input, long timeoutSeconds) {
-        Map<Long, Future<Result>> futures = new HashMap<>();
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (OpsHost host : hosts) {
-                futures.put(host.getId(), executor.submit(() -> execute(host, command.apply(host), input, null, timeoutSeconds)));
-            }
-        }
-        Map<Long, Result> results = new HashMap<>();
-        futures.forEach((id, future) -> {
-            try {
-                results.put(id, future.get());
-            } catch (Exception e) {
-                Throwable cause = e.getCause() == null ? e : e.getCause();
-                results.put(id, new Result(false, SSH_ERROR, String.valueOf(cause.getMessage())));
-            }
-        });
-        return results;
     }
 
     /** shell 命令里的参数：单引号括起来 */
@@ -108,16 +86,16 @@ public class SshRunner {
     }
 
     /** lineOut 为 null 时收集全部输出（原样保留字节，例如配置文件内容）放进 Result.output */
-    private Result execute(OpsHost host, String command, Input input, Consumer<String> lineOut, long timeoutSeconds) {
+    private Result execute(Target host, String command, Input input, Consumer<String> lineOut, long timeoutSeconds) {
         List<String> args = new ArrayList<>(List.of("ssh",
-                "-p", String.valueOf(host.getSshPort() == null ? 22 : host.getSshPort()),
+                "-p", String.valueOf(host.port()),
                 "-o", "BatchMode=yes",
                 "-o", "ConnectTimeout=" + CONNECT_TIMEOUT_SECONDS,
                 "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "ServerAliveInterval=15",
                 "-o", "ServerAliveCountMax=4",
                 "-o", "LogLevel=ERROR",
-                "root@" + host.getIp(),
+                "root@" + host.ip(),
                 command));
         Process process;
         try {

@@ -45,11 +45,8 @@ public class OperationLogService {
      * 请求当时就失败（参数不合法、已有操作在执行）仍在当时记录。
      */
     private static final Set<String> DEFERRED = Set.of(
-            "/ops/host/init",
             "/ops/app/control",
-            "/ops/app/config/save",
-            "/ops/app/deploy",
-            "/ops/app/rollback");
+            "/ops/app/deploy");
 
     /** 记录的接口和操作名称，其余接口（查询类）不记录 */
     private static final Map<String, String> ACTIONS = Map.ofEntries(
@@ -69,10 +66,6 @@ public class OperationLogService {
             Map.entry("/menu/update", "修改菜单"),
             Map.entry("/menu/remove", "删除菜单"),
             Map.entry("/system/setting/update", "修改系统设置"),
-            Map.entry("/system/backup/update", "修改备份设置"),
-            Map.entry("/system/backup/run", "立即备份"),
-            Map.entry("/system/backup/download", "下载备份"),
-            Map.entry("/system/backup/remove", "删除备份"),
             Map.entry("/data/source/create", "新建数据源"),
             Map.entry("/data/source/update", "修改数据源"),
             Map.entry("/data/source/remove", "删除数据源"),
@@ -82,17 +75,11 @@ public class OperationLogService {
             Map.entry("/data/query/export", "导出数据查询结果"),
             Map.entry("/log/event/create", "新建日志事件"),
             Map.entry("/log/event/update", "修改日志事件"),
-            Map.entry("/ops/host/create", "添加主机"),
-            Map.entry("/ops/host/update", "修改主机"),
-            Map.entry("/ops/host/init", "初始化主机"),
-            Map.entry("/ops/host/remove", "删除主机"),
             Map.entry("/ops/app/create", "新建程序"),
             Map.entry("/ops/app/update", "修改程序"),
             Map.entry("/ops/app/remove", "删除程序"),
             Map.entry("/ops/app/control", "启停程序"),
-            Map.entry("/ops/app/config/save", "修改程序配置文件"),
-            Map.entry("/ops/app/deploy", "发布程序"),
-            Map.entry("/ops/app/rollback", "回滚程序"));
+            Map.entry("/ops/app/deploy", "发布程序"));
 
     private final LoginService loginService;
     private final AccountMapper accountMapper;
