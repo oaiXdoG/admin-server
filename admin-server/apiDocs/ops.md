@@ -8,7 +8,7 @@
   - 启动、关闭、重启、发布都是通过 SSH 执行 `bash <目录>/bin/app.sh <命令>`；在服务器上手动执行 `<目录>/bin/app.sh start|stop|restart|status` 效果一样。没有 systemd，也没有自动拉起。
 - **后台执行**：启停、发布在后台执行，接口立即返回 `taskId`，发起操作的页面用 `/ops/task/get` 读实时输出。同一个程序同一时间只能有一个。谁做了什么、成功还是失败，在结束时写入操作日志。
 
-管理后台自己也用 `bin/app.sh` 启停。
+管理后台本身不登记到运维中心：它停下后就没法再启动自己，所以在服务器上手动执行 `bin/app.sh start|stop|restart`；发布时解压新包，执行包里的 `bin/app.sh deploy <程序目录>`。
 
 ## 程序目录的格式
 
@@ -35,7 +35,7 @@
 
 ## SSH
 
-执行的是 `ssh -p <端口> root@<IP>`，和在管理机上手动执行一样：用运行管理后台的用户的默认私钥（`~/.ssh/`）和 `~/.ssh/config`，公钥要加到每台服务器的 `/root/.ssh/authorized_keys`。第一次连接一台机器时自动记住它的指纹（`StrictHostKeyChecking=accept-new`），连接超时 10 秒。管理机上的程序也一样登记（填管理机的内网 IP），SSH 连自己。
+执行的是 `ssh -p <端口> root@<IP>`，和在管理机上手动执行一样：用运行管理后台的用户的默认私钥（`~/.ssh/`）和 `~/.ssh/config`，公钥要加到每台服务器的 `/root/.ssh/authorized_keys`。第一次连接一台机器时自动记住它的指纹（`StrictHostKeyChecking=accept-new`），连接超时 10 秒。管理机上的其他程序也一样登记（填管理机的内网 IP），SSH 连自己。
 
 ## 权限
 
