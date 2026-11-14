@@ -1,4 +1,10 @@
-# bin/start.sh 启动时使用的 JVM 参数：每行一个，# 开头的行和空行忽略，一行就是一个完整的参数（中间可以有空格）
-# 例如：
-# -Xms256m
-# -Xmx256m
+# 堆的初始和最大大小
+-Xms256m
+-Xmx256m
+# 使用 G1 收集器
+-XX:+UseG1GC
+# GC 日志写到 logs/gc.log，每个文件 20MB，最多保留 10 个
+-Xlog:gc*:file=logs/gc.log:time,uptime,level,tags:filecount=10,filesize=20m
+# 内存溢出时把堆转储写到 logs/
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=logs/
